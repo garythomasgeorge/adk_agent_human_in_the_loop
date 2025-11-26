@@ -74,27 +74,29 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-2">
-          <Sparkles className="text-blue-600" size={24} />
-          <h1 className="text-xl font-bold text-slate-800 tracking-tight">Customer AI</h1>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-500 hidden sm:inline">Always here to help</span>
-          {isAgentConnected && (
-            <button
-              onClick={handleEndChat}
-              className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-full text-sm font-medium transition-colors border border-red-200"
-            >
-              <XCircle size={16} /> End Chat
-            </button>
-          )}
+      <header className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 shadow-sm">
+        <div className="w-[60%] mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="text-blue-600" size={24} />
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight">Nebula Assistant</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-slate-500 hidden sm:inline">Always here to help</span>
+            {isAgentConnected && (
+              <button
+                onClick={handleEndChat}
+                className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-full text-sm font-medium transition-colors border border-red-200"
+              >
+                <XCircle size={16} /> End Chat
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent">
-        <div className="max-w-3xl mx-auto space-y-6">
+        <div className="w-[60%] mx-auto space-y-6">
           {messages.map((msg, idx) => {
             // System Message
             if (msg.sender === 'system') {
@@ -146,7 +148,7 @@ function App() {
 
       {/* Input Area */}
       <div className="bg-white border-t border-slate-200 p-4 sm:p-6">
-        <div className="max-w-3xl mx-auto">
+        <div className="w-[60%] mx-auto">
           <form onSubmit={sendMessage} className="relative flex items-center gap-3">
             <div className="flex-1 relative">
               <input

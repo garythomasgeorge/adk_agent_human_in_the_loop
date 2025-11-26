@@ -128,14 +128,15 @@ function App() {
       {/* Sidebar */}
       <div className="w-80 bg-[#1E293B] border-r border-slate-700 flex flex-col shadow-xl z-10">
         {/* Header */}
-        <div className="h-16 border-b border-slate-700 flex items-center justify-between px-6 bg-[#1E293B]">
+        <header className="bg-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between sticky top-0 z-10 shadow-md">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Shield size={18} className="text-white" />
+            <div className="bg-blue-600 p-2 rounded-lg">
+              <ShieldCheck className="text-white" size={20} />
             </div>
-            <span className="font-bold text-white tracking-tight">Zirconia Hub</span>
+            <h1 className="text-xl font-bold text-white tracking-tight">Nebula Agent Hub</h1>
           </div>
-        </div>
+          <div className="flex items-center gap-4"></div>
+        </header>
 
         {/* View Toggle */}
         <div className="p-2 grid grid-cols-2 gap-1 border-b border-slate-700">
@@ -273,10 +274,10 @@ function App() {
                       <div key={idx} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[70%] group relative ${msg.sender === 'agent' ? 'items-end' : 'items-start'} flex flex-col`}>
                           <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.sender === 'agent'
-                              ? 'bg-blue-600 text-white rounded-br-sm'
-                              : msg.sender === 'bot'
-                                ? 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'
-                                : 'bg-slate-700 text-white rounded-bl-sm'
+                            ? 'bg-blue-600 text-white rounded-br-sm'
+                            : msg.sender === 'bot'
+                              ? 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'
+                              : 'bg-slate-700 text-white rounded-bl-sm'
                             }`}>
                             {msg.content}
                           </div>

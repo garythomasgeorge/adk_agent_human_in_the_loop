@@ -5,7 +5,8 @@ from typing import List, Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from agents import TechSubAgent, BillingSubAgent, UnifiedAgent, AgentState
+from adk import RouterAgent, AgentState
+from agents import ModemInstallAgent, BillingDisputeAgent, TechSupportAgent
 
 import database
 
@@ -21,6 +22,7 @@ class ConnectionManager:
         self.agent_connections: List[WebSocket] = []
         self.session_messages: Dict[str, List[Dict]] = {} # Store messages for active sessions
         self.active_approvals: Dict[str, Dict] = {} # Store active approval requests
+        self.active_agent_names: Dict[str, str] = {} # Track active agent per client
 
     async def connect(self, websocket: WebSocket, client_id: str, role: str):
         await websocket.accept()
@@ -93,6 +95,8 @@ class ConnectionManager:
             del self.session_messages[client_id]
             if client_id in self.active_approvals:
                 del self.active_approvals[client_id]
+            if client_id in self.active_agent_names:
+                del self.active_agent_names[client_id]
             if client_id in self.active_connections:
                  # Optionally close connection or notify client
                  pass
@@ -101,10 +105,18 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Initialize Agents
-# tech_agent = TechSubAgent()
-# billing_agent = BillingSubAgent()
-active_agent = UnifiedAgent() # Use UnifiedAgent for all scenarios
+# Initialize ADK Agents
+modem_agent = ModemInstallAgent()
+billing_agent = BillingDisputeAgent()
+tech_agent = TechSupportAgent()
+
+# Initialize Router
+router = RouterAgent({
+    "modem_install": modem_agent,
+    "billing": billing_agent,
+    "tech_support": tech_agent,
+    "default": tech_agent  # Default to tech support
+})
 
 @app.websocket("/ws/{client_id}/{role}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
@@ -132,16 +144,28 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                     "timestamp": msg_obj["timestamp"]
                 })
                 
-                # 3. Process with Bot
-                # Check if bot is paused (waiting for approval)
-                if active_agent.state == AgentState.WAITING_FOR_APPROVAL:
+                # 3. Route to appropriate agent
+                active_agent_name = manager.active_agent_names.get(client_id)
+                selected_agent = router.route(message_data["content"], active_agent_name)
+                manager.active_agent_names[client_id] = selected_agent.name
+                
+                # 4. Process with selected agent
+                # Check if agent is paused (waiting for approval)
+                if selected_agent.state == AgentState.WAITING_FOR_APPROVAL:
                      response_content = "Waiting for supervisor approval..."
                      bot_msg = {"sender": "system", "content": response_content}
                      manager.add_message(client_id, bot_msg)
                      await manager.send_to_client(client_id, bot_msg)
                 else:
-                    # Process message
-                    result = await active_agent.process(message_data["content"])
+                    # Get conversation context
+                    context = manager.get_messages(client_id)
+                    
+                    # Process message with selected agent
+                    if isinstance(selected_agent, TechSupportAgent):
+                        # TechSupportAgent needs async processing
+                        result = await selected_agent.process_async(message_data["content"], context)
+                    else:
+                        result = selected_agent.process(message_data["content"], context)
                     
                     if result.get("action_required"):
                         # Notify Agents of Approval Request
@@ -181,11 +205,16 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                     approved = message_data.get("approved")
                     manager.remove_approval(target_client_id) # Remove from active approvals
                     
+                    # Reset the agent state for this client
+                    active_agent_name = manager.active_agent_names.get(target_client_id)
+                    if active_agent_name:
+                        selected_agent = router.agents.get(active_agent_name)
+                        if selected_agent:
+                            selected_agent.state = AgentState.IDLE
+                    
                     if approved:
-                        active_agent.state = AgentState.IDLE
                         response = "Supervisor approved your request."
                     else:
-                        active_agent.state = AgentState.IDLE
                         response = "Supervisor declined your request."
                     
                     bot_msg = {"sender": "bot", "content": response}
