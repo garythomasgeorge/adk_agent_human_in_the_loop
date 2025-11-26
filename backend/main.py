@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from adk import RouterAgent, AgentState
-from agents import ModemInstallAgent, BillingDisputeAgent, TechSupportAgent
+from agents import GreetingAgent, ModemInstallAgent, BillingDisputeAgent, TechSupportAgent
 
 import database
 
@@ -106,16 +106,18 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Initialize ADK Agents
+greeting_agent = GreetingAgent()
 modem_agent = ModemInstallAgent()
 billing_agent = BillingDisputeAgent()
 tech_agent = TechSupportAgent()
 
 # Initialize Router
 router = RouterAgent({
+    "greeting": greeting_agent,
     "modem_install": modem_agent,
     "billing": billing_agent,
     "tech_support": tech_agent,
-    "default": tech_agent  # Default to tech support
+    "default": greeting_agent  # Default to greeting agent
 })
 
 @app.websocket("/ws/{client_id}/{role}")

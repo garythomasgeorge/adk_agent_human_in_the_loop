@@ -9,6 +9,53 @@ from typing import Dict, Any
 from adk import Agent, AgentState
 
 
+class GreetingAgent(Agent):
+    """Handles greetings, small talk, and provides general help menu."""
+    
+    def __init__(self):
+        super().__init__("Greeting")
+    
+    def process(self, message: str, context: list) -> dict:
+        """Process greetings and small talk."""
+        msg_lower = message.lower()
+        
+        # Greetings
+        if any(greeting in msg_lower for greeting in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
+            return {
+                "response": "Hello! 👋 Welcome to Nebula Assistant. I'm here to help you with:\n\n• **Modem Installation** - Get your new modem set up\n• **Billing Questions** - Check charges or request credits\n• **Tech Support** - Troubleshoot internet issues\n\nWhat can I help you with today?"
+            }
+        
+        # How are you / small talk
+        if any(phrase in msg_lower for phrase in ["how are you", "how's it going", "what's up", "how do you do"]):
+            return {
+                "response": "I'm doing great, thank you for asking! 😊 I'm here and ready to help you with any questions about your service. What can I assist you with?"
+            }
+        
+        # Thanks / gratitude
+        if any(phrase in msg_lower for phrase in ["thank", "thanks", "appreciate"]):
+            return {
+                "response": "You're very welcome! Is there anything else I can help you with today?"
+            }
+        
+        # Help / menu
+        if "help" in msg_lower or "menu" in msg_lower or "options" in msg_lower:
+            return {
+                "response": "I can assist you with:\n\n• **Modem Installation** - Say 'install modem' for step-by-step setup\n• **Billing Questions** - Ask about charges, credits, or your bill\n• **Tech Support** - Report internet issues or slow speeds\n\nJust let me know what you need!"
+            }
+        
+        # Goodbye
+        if any(phrase in msg_lower for phrase in ["bye", "goodbye", "see you", "later"]):
+            return {
+                "response": "Goodbye! Have a great day! Feel free to come back anytime you need assistance. 👋"
+            }
+        
+        # Default - offer help
+        self.state = AgentState.IDLE
+        return {
+            "response": "I'm here to help! You can ask me about:\n\n• Modem installation\n• Billing questions\n• Internet troubleshooting\n\nWhat would you like help with?"
+        }
+
+
 class ModemInstallAgent(Agent):
     """Handles modem installation guided setup (soft handoff scenario)."""
     
