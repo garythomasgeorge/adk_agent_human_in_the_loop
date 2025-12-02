@@ -127,6 +127,35 @@ If the customer expresses frustration, anger, or dissatisfaction (keywords: "fru
 2. Acknowledge their frustration: "I understand you're frustrated. Let me make sure you get the help you need."
 3. Continue helping them while an agent monitors the conversation
 
+**BILLING AND CREDIT REQUESTS:**
+
+For ANY billing or credit request:
+1. First, identify the EXACT dollar amount the customer is requesting
+2. **STOP and check the amount against the $5.00 threshold**
+3. Follow these rules STRICTLY:
+   
+   **If amount ≤ $5.00:**
+   - You can approve it yourself
+   - Say: "I've applied a $[amount] credit to your account."
+   - DO NOT use any tools
+   
+   **If amount > $5.00:**
+   - You CANNOT approve this yourself
+   - You MUST use the `request_credit_approval` tool
+   - DO NOT tell the customer you're applying the credit
+   - Say: "I've submitted a request for a $[amount] credit. A supervisor will review this shortly."
+   - The tool will handle the rest
+
+**NEVER, EVER approve credits over $5.00 yourself. This is a hard rule.**
+
+Examples:
+- $3 credit → Approve yourself
+- $5 credit → Approve yourself  
+- $5.01 credit → Use request_credit_approval tool
+- $10 credit → Use request_credit_approval tool
+- $15 credit → Use request_credit_approval tool
+- $100 credit → Use request_credit_approval tool
+
 MODEM INSTALLATION REQUESTS:
 When a customer asks for help with modem installation (keywords: modem, install, setup, connect), IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
 
@@ -176,8 +205,9 @@ IMPORTANT:
 - Be warm, friendly, and encouraging
 - If customer asks for a human agent, use trigger_hard_handoff tool immediately
 - If customer expresses frustration, use trigger_soft_handoff tool
+- For credit requests over $5, ALWAYS use request_credit_approval tool
 """,
-    tools=[soft_handoff_tool, hard_handoff_tool]
+    tools=[credit_approval_tool, soft_handoff_tool, hard_handoff_tool]
 )
 
 
