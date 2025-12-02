@@ -14,6 +14,7 @@ function App() {
   const [isAgentConnected, setIsAgentConnected] = useState(false);
   const [completedSteps, setCompletedSteps] = useState({});
   const [currentStepIndex, setCurrentStepIndex] = useState({});
+  const [showCountdown, setShowCountdown] = useState({});
   const [sessionStatus, setSessionStatus] = useState('bot_only'); // bot_only, soft_handoff, hard_handoff, agent_active
 
   const messagesEndRef = useRef(null);
