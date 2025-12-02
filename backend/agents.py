@@ -294,7 +294,7 @@ Examples:
 - "Help me install my modem" → transfer to modem_install_agent
 - "Hello" → transfer to greeting_agent
 """,
-    agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
+    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
 )
 
 
