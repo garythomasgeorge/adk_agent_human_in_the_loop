@@ -5,15 +5,35 @@ from typing import List, Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from adk import RouterAgent, AgentState
-from agents import GreetingAgent, ModemInstallAgent, BillingDisputeAgent, TechSupportAgent
+from dotenv import load_dotenv
+
+# Google ADK imports
+from google.adk.runners import InMemoryRunner
+from google.adk.agents import LiveRequestQueue
+from google.adk.agents.run_config import RunConfig
+from google.genai.types import Content, Part, Blob, Modality
+
+# Import agents
+from agents import (
+    greeting_agent,
+    modem_install_agent as modem_agent,
+    billing_agent,
+    tech_support_agent,
+    route_to_agent
+)
 
 import database
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI()
 
 # Initialize Database
 database.init_db()
+
+# Note: We will initialize InMemoryRunner dynamically in the websocket endpoint
+# to support different agents per session
 
 # Store active connections and chat history in memory for active sessions
 class ConnectionManager:
@@ -47,10 +67,6 @@ class ConnectionManager:
         else:
             if client_id in self.active_connections:
                 del self.active_connections[client_id]
-                # Auto-save on disconnect? Or wait for explicit end?
-                # For now, let's keep it in memory until explicit end or maybe save on disconnect as "interrupted"
-                # But user asked for "End Session" button to trigger save.
-                # We will implement a specific "end_session" event.
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
@@ -105,100 +121,155 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Initialize ADK Agents
-greeting_agent = GreetingAgent()
-modem_agent = ModemInstallAgent()
-billing_agent = BillingDisputeAgent()
-tech_agent = TechSupportAgent()
+# Simple keyword-based routing (can be enhanced with LLM later)
+def route_to_agent(message: str, current_agent_name: str = None):
+    """Route message to appropriate agent based on keywords."""
+    msg_lower = message.lower()
+    
+    # Check for strong topic switches
+    if any(keyword in msg_lower for keyword in ["install", "modem", "setup", "set up"]):
+        return modem_install_agent
+    
+    if any(keyword in msg_lower for keyword in ["bill", "charge", "credit", "refund", "movie", "rental"]):
+        return billing_agent
+    
+    if any(keyword in msg_lower for keyword in ["internet", "slow", "connection", "wifi", "speed", "down"]):
+        return tech_support_agent
+    
+    # If no strong topic, stick to current agent if it exists
+    if current_agent_name:
+        agents_map = {
+            "greeting_agent": greeting_agent,
+            "modem_install_agent": modem_install_agent,
+            "billing_agent": billing_agent,
+            "tech_support_agent": tech_support_agent
+        }
+        return agents_map.get(current_agent_name, greeting_agent)
+    
+    # Default to greeting agent
+    return greeting_agent
 
-# Initialize Router
-router = RouterAgent({
-    "greeting": greeting_agent,
-    "modem_install": modem_agent,
-    "billing": billing_agent,
-    "tech_support": tech_agent,
-    "default": greeting_agent  # Default to greeting agent
-})
+
+async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id: str):
+    """Forward agent events to WebSocket client"""
+    print(f"Starting agent_to_client_messaging for {client_id}")
+    try:
+        accumulated_response = ""
+        async for event in live_events:
+            print(f"Received event from agent: {event}")
+            try:
+                # Extract text from event and accumulate
+                if event.content and hasattr(event.content, 'parts'):
+                    text_parts = [part.text for part in event.content.parts if part.text]
+                    if text_parts:
+                        response_text = "".join(text_parts)
+                        print(f"Agent response text: {response_text} (partial={event.partial}, turn_complete={event.turn_complete})")
+                        # Accumulate the response
+                        accumulated_response = response_text
+                
+                # Send accumulated response when turn is complete
+                if event.turn_complete and accumulated_response:
+                    print(f"Sending complete response: {accumulated_response}")
+                    await websocket.send_json({
+                        "sender": "bot",
+                        "content": accumulated_response
+                    })
+                    
+                    # Broadcast to agents (for monitoring/history)
+                    await manager.broadcast_to_agents({
+                        "type": "message",
+                        "sender": "bot",
+                        "content": accumulated_response,
+                        "clientId": client_id
+                    })
+                    
+                    # Reset accumulator for next turn
+                    accumulated_response = ""
+                
+                # Check for tool calls / approval requests
+                if event.content and hasattr(event.content, 'parts'):
+                    for part in event.content.parts:
+                        if part.function_call:
+                            print(f"Function call detected: {part.function_call.name}")
+                            # Check if it's an approval request
+                            if part.function_call.name == "request_credit_approval":
+                                approval_data = {
+                                    "type": "approval_request",
+                                    "clientId": client_id,
+                                    "amount": part.function_call.args.get("amount"),
+                                    "reason": part.function_call.args.get("reason")
+                                }
+                                await manager.broadcast_to_agents(approval_data)
+                            elif part.function_call.name == "request_tech_dispatch":
+                                approval_data = {
+                                    "type": "approval_request",
+                                    "clientId": client_id,
+                                    "amount": 0,
+                                    "reason": part.function_call.args.get("reason")
+                                }
+                                await manager.broadcast_to_agents(approval_data)
+
+            except Exception as e:
+                print(f"Error processing event: {e}")
+    except Exception as e:
+        print(f"Error in agent_to_client_messaging loop: {e}")
+    finally:
+        print(f"Exiting agent_to_client_messaging for {client_id}")
+
+async def client_to_agent_messaging(websocket: WebSocket, live_request_queue: LiveRequestQueue, client_id: str):
+    """Forward client messages to ADK agent"""
+    print(f"Starting client_to_agent_messaging for {client_id}")
+    while True:
+        try:
+            data = await websocket.receive_text()
+            print(f"Received message from client {client_id}: {data}")
+            message_data = json.loads(data)
+            
+            # Store message in history
+            msg_obj = {
+                "sender": "customer",
+                "content": message_data["content"],
+                "timestamp": message_data.get("timestamp")
+            }
+            manager.add_message(client_id, msg_obj)
+
+            # Broadcast customer message to agents
+            await manager.broadcast_to_agents({
+                "type": "message",
+                "sender": "customer",
+                "content": message_data["content"],
+                "clientId": client_id,
+                "timestamp": msg_obj["timestamp"]
+            })
+            
+            # Create Content object
+            content = Content(
+                role="user",
+                parts=[Part.from_text(text=message_data["content"])]
+            )
+            
+            # Send to agent via queue
+            print(f"Sending content to agent queue: {content}")
+            live_request_queue.send_content(content=content)
+            
+        except WebSocketDisconnect:
+            print(f"WebSocket disconnected in client_to_agent_messaging for {client_id}")
+            break
+        except Exception as e:
+            print(f"Error in client_to_agent_messaging: {e}")
+            break
 
 @app.websocket("/ws/{client_id}/{role}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
     await manager.connect(websocket, client_id, role)
+    
     try:
-        while True:
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            
-            if role == "customer":
-                # 1. Store message
-                msg_obj = {
-                    "sender": "customer",
-                    "content": message_data["content"],
-                    "timestamp": message_data.get("timestamp")
-                }
-                manager.add_message(client_id, msg_obj)
-
-                # 2. Broadcast customer message to agents
-                await manager.broadcast_to_agents({
-                    "type": "message",
-                    "sender": "customer",
-                    "content": message_data["content"],
-                    "clientId": client_id,
-                    "timestamp": msg_obj["timestamp"]
-                })
+        if role == "agent":
+            # Agent logic remains simple (receive broadcasts)
+            while True:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
                 
-                # 3. Route to appropriate agent
-                active_agent_name = manager.active_agent_names.get(client_id)
-                selected_agent = router.route(message_data["content"], active_agent_name)
-                manager.active_agent_names[client_id] = selected_agent.name
-                
-                # 4. Process with selected agent
-                # Check if agent is paused (waiting for approval)
-                if selected_agent.state == AgentState.WAITING_FOR_APPROVAL:
-                     response_content = "Waiting for supervisor approval..."
-                     bot_msg = {"sender": "system", "content": response_content}
-                     manager.add_message(client_id, bot_msg)
-                     await manager.send_to_client(client_id, bot_msg)
-                else:
-                    # Get conversation context
-                    context = manager.get_messages(client_id)
-                    
-                    # Process message with selected agent
-                    if isinstance(selected_agent, TechSupportAgent):
-                        # TechSupportAgent needs async processing
-                        result = await selected_agent.process_async(message_data["content"], context)
-                    else:
-                        result = selected_agent.process(message_data["content"], context)
-                    
-                    if result.get("action_required"):
-                        # Notify Agents of Approval Request
-                        approval_data = {
-                            "type": "approval_request",
-                            "clientId": client_id,
-                            "amount": result.get("amount"),
-                            "reason": result.get("reason")
-                        }
-                        manager.add_approval(client_id, approval_data)
-                        await manager.broadcast_to_agents(approval_data)
-                        
-                        response_content = result["response"]
-                        bot_msg = {"sender": "bot", "content": response_content}
-                        manager.add_message(client_id, bot_msg)
-                        await manager.send_to_client(client_id, bot_msg)
-                    else:
-                        # Normal response
-                        response_text = result["response"]
-                        bot_msg = {"sender": "bot", "content": response_text}
-                        manager.add_message(client_id, bot_msg)
-                        
-                        await manager.send_to_client(client_id, bot_msg)
-                        await manager.broadcast_to_agents({
-                            "type": "message",
-                            "sender": "bot",
-                            "content": response_text,
-                            "clientId": client_id
-                        })
-
-            elif role == "agent":
                 # Handle Agent Actions
                 action_type = message_data.get("type")
                 target_client_id = message_data.get("targetClientId")
@@ -206,13 +277,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                 if action_type == "approval_response":
                     approved = message_data.get("approved")
                     manager.remove_approval(target_client_id) # Remove from active approvals
-                    
-                    # Reset the agent state for this client
-                    active_agent_name = manager.active_agent_names.get(target_client_id)
-                    if active_agent_name:
-                        selected_agent = router.agents.get(active_agent_name)
-                        if selected_agent:
-                            selected_agent.state = AgentState.IDLE
                     
                     if approved:
                         response = "Supervisor approved your request."
@@ -233,14 +297,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                     
                 elif action_type == "takeover_message":
                      # Check if this is the first agent message to send "Joined" notification
-                     # For simplicity, we'll just send it if the previous message wasn't from an agent, 
-                     # or we can rely on the frontend to show it once. 
-                     # Better: Send a specific system message.
-                     
-                     # Let's just send the message. The user asked for "Agent Name has joined".
-                     # We'll send a system message first.
-                     # In a real app, we'd track if we already sent this.
-                     # For this PoC, we'll send it if the last message wasn't from 'agent'.
                      messages = manager.get_messages(target_client_id)
                      last_sender = messages[-1]['sender'] if messages else None
                      
@@ -262,8 +318,55 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                         "type": "session_ended",
                         "clientId": target_client_id
                     })
+        
+        elif role == "customer":
+            # 1. Determine initial agent (Greeting)
+            active_agent_name = manager.active_agent_names.get(client_id, "Greeting Agent")
+            selected_agent = greeting_agent # Default
+            
+            # 2. Initialize Runner for this session
+            runner = InMemoryRunner(
+                app_name="human_in_the_loop_poc",
+                agent=selected_agent
+            )
+            
+            # 3. Create Session
+            session = await runner.session_service.create_session(
+                app_name="human_in_the_loop_poc",
+                user_id=client_id,
+                session_id=client_id
+            )
+            
+            # 4. Create LiveRequestQueue
+            live_request_queue = LiveRequestQueue()
+            
+            # 5. Configure Run
+            run_config = RunConfig(
+                response_modalities=[Modality.TEXT]
+            )
+            
+            # 6. Start Live Streaming
+            print(f"Starting run_live for {client_id}")
+            live_events = runner.run_live(
+                session=session,
+                live_request_queue=live_request_queue,
+                run_config=run_config
+            )
+            
+            # 7. Start bidirectional tasks
+            agent_task = asyncio.create_task(agent_to_client_messaging(websocket, live_events, client_id))
+            client_task = asyncio.create_task(client_to_agent_messaging(websocket, live_request_queue, client_id))
+            
+            # Wait for disconnection
+            await asyncio.wait([agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION)
+            
+            # Cleanup
+            live_request_queue.close()
 
     except WebSocketDisconnect:
+        manager.disconnect(websocket, client_id, role)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
         manager.disconnect(websocket, client_id, role)
 
 # API Endpoints for History

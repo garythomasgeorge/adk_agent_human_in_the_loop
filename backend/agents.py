@@ -1,193 +1,268 @@
 """
-ADK-based specialized agents for the Human-in-the-Loop PoC.
-Each agent handles a specific domain (modem installation, billing, tech support).
+Google ADK-based agents for the Human-in-the-Loop PoC.
+Uses LlmAgent with Gemini for natural language understanding.
 """
 
-import asyncio
-import random
-from typing import Dict, Any
-from adk import Agent, AgentState
+import os
+from dotenv import load_dotenv
+from google.adk.agents import LlmAgent
+from google.adk.tools import FunctionTool
+
+# Load environment variables
+load_dotenv()
+
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 
 
-class GreetingAgent(Agent):
-    """Handles greetings, small talk, and provides general help menu."""
+# Define tools for approval workflows
+def request_credit_approval(amount: float, reason: str) -> dict:
+    """
+    Request supervisor approval for a credit.
     
-    def __init__(self):
-        super().__init__("Greeting")
-    
-    def process(self, message: str, context: list) -> dict:
-        """Process greetings and small talk."""
-        msg_lower = message.lower()
+    Args:
+        amount: The credit amount in dollars
+        reason: The reason for the credit request
         
-        # Greetings
-        if any(greeting in msg_lower for greeting in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]):
-            return {
-                "response": "Hello! 👋 Welcome to Nebula Assistant. I'm here to help you with:\n\n• **Modem Installation** - Get your new modem set up\n• **Billing Questions** - Check charges or request credits\n• **Tech Support** - Troubleshoot internet issues\n\nWhat can I help you with today?"
-            }
-        
-        # How are you / small talk
-        if any(phrase in msg_lower for phrase in ["how are you", "how's it going", "what's up", "how do you do"]):
-            return {
-                "response": "I'm doing great, thank you for asking! 😊 I'm here and ready to help you with any questions about your service. What can I assist you with?"
-            }
-        
-        # Thanks / gratitude
-        if any(phrase in msg_lower for phrase in ["thank", "thanks", "appreciate"]):
-            return {
-                "response": "You're very welcome! Is there anything else I can help you with today?"
-            }
-        
-        # Help / menu
-        if "help" in msg_lower or "menu" in msg_lower or "options" in msg_lower:
-            return {
-                "response": "I can assist you with:\n\n• **Modem Installation** - Say 'install modem' for step-by-step setup\n• **Billing Questions** - Ask about charges, credits, or your bill\n• **Tech Support** - Report internet issues or slow speeds\n\nJust let me know what you need!"
-            }
-        
-        # Goodbye
-        if any(phrase in msg_lower for phrase in ["bye", "goodbye", "see you", "later"]):
-            return {
-                "response": "Goodbye! Have a great day! Feel free to come back anytime you need assistance. 👋"
-            }
-        
-        # Default - offer help
-        self.state = AgentState.IDLE
-        return {
-            "response": "I'm here to help! You can ask me about:\n\n• Modem installation\n• Billing questions\n• Internet troubleshooting\n\nWhat would you like help with?"
-        }
+    Returns:
+        dict with action_required flag and approval details
+    """
+    return {
+        "action_required": True,
+        "amount": amount,
+        "reason": reason,
+        "response": f"I've submitted a request for a ${amount:.2f} credit. A supervisor will review this shortly."
+    }
 
 
-class ModemInstallAgent(Agent):
-    """Handles modem installation guided setup (soft handoff scenario)."""
+def request_tech_dispatch(reason: str) -> dict:
+    """
+    Request supervisor approval for technician dispatch.
     
-    def __init__(self):
-        super().__init__("ModemInstall")
-        self.modem_steps = [
-            "Great! Let's get your new modem set up. \n\n**Step 1:** Open the box and take out the modem and the power cord.",
-            "**Step 2:** Connect the coax cable from the wall to the back of the modem. Make sure it's finger-tight.",
-            "**Step 3:** Plug the power cord into the modem and then into an electrical outlet.",
-            "**Step 4:** Wait for the 'Online' light to turn solid white. This might take up to 10 minutes.",
-            "**Step 5:** Connect your devices to the WiFi using the Network Name (SSID) and Password printed on the bottom of the modem."
-        ]
-        self.current_step = -1
-        self.in_flow = False
+    Args:
+        reason: The reason for technician dispatch
+        
+    Returns:
+        dict with action_required flag and approval details
+    """
+    return {
+        "action_required": True,
+        "amount": 0,
+        "reason": reason,
+        "response": f"I need to send a technician to your location. Let me get supervisor approval for the dispatch."
+    }
+
+
+# Create ADK Tools
+credit_approval_tool = FunctionTool(
+    func=request_credit_approval
+)
+
+tech_dispatch_tool = FunctionTool(
+    func=request_tech_dispatch
+)
+
+
+# Greeting Agent
+greeting_agent = LlmAgent(
+    model=GEMINI_MODEL,
+    name="greeting_agent",
+    description="Handles greetings, small talk, and provides help menu for Nebula Assistant",
+    instruction="""You are a friendly customer service assistant for Nebula Assistant.
+
+Your role:
+- Greet customers warmly when they say hi, hello, hey, or similar
+- Respond to small talk like "how are you" with friendly, brief responses
+- Thank customers when they express gratitude
+
+MODEM INSTALLATION REQUESTS:
+When a customer asks for help with modem installation (keywords: modem, install, setup, connect), IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
+
+Alright, here are the detailed steps for installing your modem:
+
+1. **Unpack Your Modem**: Remove the modem, power adapter, and any cables from the box.
+2. **Connect the Cable**:
+   - Find the coaxial cable (the one with a screw-on connector).
+   - Connect one end to the cable wall outlet.
+   - Connect the other end to the modem's "Cable" or "RF In" port.
+   - Make sure the connection is finger-tight.
+3. **Plug in the Power**:
+   - Plug the power adapter into the modem.
+   - Plug the other end into a power outlet.
+   - The modem will power on automatically.
+4. **Wait for the Modem to Initialize**:
+   - Wait a few minutes for the modem to power on and connect to the network.
+   - Check the modem's lights. Usually, a "Cable," "Online," or "Internet" light will turn solid when the modem is connected.
+5. **Connect to Your Computer or Router**:
+   - Use an Ethernet cable to connect the modem to your computer or router.
+   - Plug one end into the modem's Ethernet port.
+   - Plug the other end into your computer's Ethernet port or your router's "Internet" or "WAN" port.
+6. **Activate Your Modem (if required)**:
+   - Open a web browser on your computer.
+   - You may be automatically redirected to your ISP's activation page. If not, go to your ISP's website and look for a "Activate Modem" or "Self-Installation" link.
+   - Follow the on-screen instructions to activate your modem. You'll likely need your account number and the modem's serial number.
+7. **Test Your Internet Connection**:
+   - After activation, try browsing the web to make sure your internet connection is working.
+
+Let me know if you get stuck at any point!
+
+BILLING QUESTIONS:
+For billing questions, help them with charges, credits, or bill explanations.
+
+TECH SUPPORT:
+For tech support, help troubleshoot internet issues or slow speeds.
+
+GENERAL HELP MENU:
+When asked for help or menu, provide these options:
+  • Modem Installation - Help setting up a new modem
+  • Billing Questions - Check charges, request credits, or discuss bills
+  • Tech Support - Troubleshoot internet issues or slow speeds
+
+IMPORTANT: 
+- For modem installation, use the EXACT format with numbered steps and **bold titles**
+- Provide ALL steps immediately, don't wait for the customer to ask
+- Be warm, friendly, and encouraging
+"""
+)
+
+
+# Modem Install Agent
+modem_install_agent = LlmAgent(
+    model=GEMINI_MODEL,
+    name="modem_install_agent",
+    description="Guides customers through modem installation step-by-step",
+    instruction="""You are a technical support specialist helping customers install their new modem.
+
+When a customer asks for help with modem installation, IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
+
+Alright, here are the detailed steps for installing your modem:
+
+1. **Unpack Your Modem**: Remove the modem, power adapter, and any cables from the box.
+2. **Connect the Cable**:
+   - Find the coaxial cable (the one with a screw-on connector).
+   - Connect one end to the cable wall outlet.
+   - Connect the other end to the modem's "Cable" or "RF In" port.
+   - Make sure the connection is finger-tight.
+3. **Plug in the Power**:
+   - Plug the power adapter into the modem.
+   - Plug the other end into a power outlet.
+   - The modem will power on automatically.
+4. **Wait for the Modem to Initialize**:
+   - Wait a few minutes for the modem to power on and connect to the network.
+   - Check the modem's lights. Usually, a "Cable," "Online," or "Internet" light will turn solid when the modem is connected.
+5. **Connect to Your Computer or Router**:
+   - Use an Ethernet cable to connect the modem to your computer or router.
+   - Plug one end into the modem's Ethernet port.
+   - Plug the other end into your computer's Ethernet port or your router's "Internet" or "WAN" port.
+6. **Activate Your Modem (if required)**:
+   - Open a web browser on your computer.
+   - You may be automatically redirected to your ISP's activation page. If not, go to your ISP's website and look for a "Activate Modem" or "Self-Installation" link.
+   - Follow the on-screen instructions to activate your modem. You'll likely need your account number and the modem's serial number.
+7. **Test Your Internet Connection**:
+   - After activation, try browsing the web to make sure your internet connection is working.
+
+Let me know if you get stuck at any point!
+
+IMPORTANT: 
+- Use this EXACT format with numbered steps and **bold titles**
+- Provide ALL steps immediately, don't wait for the customer to ask
+- After providing the steps, ask if they need help with any specific step
+- Be encouraging and supportive throughout
+"""
+)
+
+
+# Billing Agent
+billing_agent = LlmAgent(
+    model=GEMINI_MODEL,
+    name="billing_agent",
+    description="Handles billing questions and credit requests with supervisor approval",
+    instruction="""You are a billing specialist for Nebula Assistant.
+
+Your responsibilities:
+- Answer questions about charges and bills
+- Handle credit requests for disputed charges
+- Explain billing details clearly
+
+For credit requests:
+1. Listen to the customer's concern about a charge
+2. Ask clarifying questions if needed
+3. If they dispute a charge (movie rental, service fee, etc.), use the request_credit_approval tool
+4. The tool will submit the request to a supervisor for approval
+5. Let the customer know a supervisor is reviewing the request
+
+Be empathetic, professional, and helpful. Always verify the charge details before requesting approval.
+For charges under $50, you can be more lenient. For larger amounts, gather more details.
+""",
+    tools=[credit_approval_tool]
+)
+
+
+# Tech Support Agent
+tech_support_agent = LlmAgent(
+    model=GEMINI_MODEL,
+    name="tech_support_agent",
+    description="Troubleshoots internet issues and coordinates technician dispatch",
+    instruction="""You are a technical support specialist for Nebula Assistant.
+
+Your responsibilities:
+- Troubleshoot internet connectivity issues
+- Diagnose slow speeds or connection problems
+- Coordinate technician dispatch when needed
+
+Troubleshooting process:
+1. Ask about the specific issue (slow speeds, no connection, intermittent)
+2. Suggest basic troubleshooting:
+   - Check if modem lights are solid or blinking
+   - Try restarting the modem (unplug for 10 seconds)
+   - Check cable connections
+
+3. If basic troubleshooting doesn't work:
+   - Mention you'll run a remote system check
+   - Simulate checking the line (take a moment)
+   - If there's a signal issue you can't fix remotely, use request_tech_dispatch tool
+
+4. The tech dispatch tool will request supervisor approval
+5. Let the customer know a supervisor is reviewing the dispatch request
+
+Be patient, technical but not overly complex, and reassuring. Guide them through each step clearly.
+""",
+    tools=[tech_dispatch_tool]
+)
+
+
+def route_to_agent(user_message: str, current_agent_name: str = None):
+    """
+    Simple keyword-based routing to select the appropriate agent.
+    In a real system, this would use an LLM router or classifier.
+    """
+    msg = user_message.lower()
     
-    def process(self, message: str, context: list) -> dict:
-        """Process modem installation requests."""
-        msg_lower = message.lower()
-        
-        # Start flow
-        if "modem" in msg_lower and ("install" in msg_lower or "setup" in msg_lower or "set up" in msg_lower):
-            self.in_flow = True
-            self.current_step = 0
-            self.state = AgentState.IDLE
-            return {"response": self.modem_steps[0]}
-        
-        # In flow
-        if self.in_flow:
-            if "quit" in msg_lower or "stop" in msg_lower:
-                self.in_flow = False
-                self.current_step = -1
-                self.state = AgentState.IDLE
-                return {"response": "Modem setup cancelled. How else can I help?"}
+    # If already in a specific flow, stick with it unless explicit exit
+    if current_agent_name == "modem_install_agent":
+        if "billing" in msg or "tech support" in msg:
+            pass # Allow switching
+        else:
+            return modem_install_agent
             
-            self.current_step += 1
-            if self.current_step < len(self.modem_steps):
-                self.state = AgentState.IDLE
-                return {"response": self.modem_steps[self.current_step]}
-            else:
-                self.in_flow = False
-                self.current_step = -1
-                self.state = AgentState.IDLE
-                return {"response": "Congratulations! Your modem should be all set up. Is there anything else?"}
-        
-        # Default
-        self.state = AgentState.IDLE
-        return {"response": "I can help you install a new modem. Just say 'install modem' to get started."}
+    if current_agent_name == "billing_agent":
+        if "modem" in msg or "tech support" in msg:
+            pass
+        else:
+            return billing_agent
 
+    if current_agent_name == "tech_support_agent":
+        if "billing" in msg or "modem" in msg:
+            pass
+        else:
+            return tech_support_agent
 
-class BillingDisputeAgent(Agent):
-    """Handles billing disputes and credit requests (hard handoff scenario)."""
+    # Keyword routing
+    if "modem" in msg or "install" in msg or "setup" in msg:
+        return modem_install_agent
+    elif "bill" in msg or "charge" in msg or "credit" in msg or "cost" in msg:
+        return billing_agent
+    elif "slow" in msg or "internet" in msg or "down" in msg or "connect" in msg or "wifi" in msg:
+        return tech_support_agent
     
-    def __init__(self):
-        super().__init__("Billing")
-        self.credit_threshold = 10.0
-    
-    def process(self, message: str, context: list) -> dict:
-        """Process billing and credit requests."""
-        msg_lower = message.lower()
-        
-        # Check for billing keywords
-        if "bill" in msg_lower or "charge" in msg_lower or "credit" in msg_lower:
-            # Check for movie rental dispute
-            if "movie" in msg_lower or "rental" in msg_lower:
-                # Check if user is disputing
-                if "not" in msg_lower or "didn't" in msg_lower or "never" in msg_lower:
-                    # Request credit (requires approval)
-                    self.state = AgentState.WAITING_FOR_APPROVAL
-                    return {
-                        "response": "I understand you're disputing a movie rental charge. Let me request a credit for you.",
-                        "action_required": True,
-                        "amount": 14.99,
-                        "reason": "Movie Rental Dispute - Customer claims unauthorized charge"
-                    }
-                else:
-                    return {"response": "I see a movie rental charge of $14.99 on your account. Is this charge correct?"}
-            
-            # General billing inquiry
-            return {"response": "I can help with billing questions. What would you like to know about your bill?"}
-        
-        # Default
-        self.state = AgentState.IDLE
-        return {"response": "I can help with billing and credit requests. What do you need assistance with?"}
-
-
-class TechSupportAgent(Agent):
-    """Handles internet troubleshooting and tech dispatch (hard handoff scenario)."""
-    
-    def __init__(self):
-        super().__init__("TechSupport")
-        self.current_step = 0
-    
-    async def process_async(self, message: str, context: list) -> dict:
-        """Async version of process for system check simulation."""
-        msg_lower = message.lower()
-        
-        # Check for internet issues
-        if "internet" in msg_lower or "slow" in msg_lower or "down" in msg_lower or "connection" in msg_lower:
-            # Reset flow
-            if "reset" in msg_lower:
-                self.current_step = 0
-            
-            if self.current_step == 0:
-                self.current_step += 1
-                self.state = AgentState.PROCESSING
-                return {"response": "I'm sorry to hear about your internet issues. Let me run a remote system health check. This will take a few seconds..."}
-            
-            elif self.current_step == 1:
-                # Simulate system check
-                await asyncio.sleep(2)
-                success = random.choice([True, False])
-                
-                if success:
-                    self.current_step = 0
-                    self.state = AgentState.IDLE
-                    return {"response": "Good news! The system check cleared some temporary cache errors on your line. Your internet should be back to normal speed now. Please check it."}
-                else:
-                    self.current_step += 1
-                    self.state = AgentState.WAITING_FOR_APPROVAL
-                    return {
-                        "response": "The system check detected a signal degradation that I can't fix remotely. We need to send a technician to your home.",
-                        "action_required": True,
-                        "amount": 0,
-                        "reason": "Technician Dispatch Required (Signal Degradation)"
-                    }
-        
-        # Default
-        self.state = AgentState.IDLE
-        return {"response": "I can help troubleshoot internet connection issues. Are you experiencing problems with your internet?"}
-    
-    def process(self, message: str, context: list) -> dict:
-        """Synchronous wrapper for process_async."""
-        # This will be called from sync context, so we need to handle it
-        # For now, return a simple response and let the async version be called separately
-        return asyncio.run(self.process_async(message, context))
+    # Default to greeting agent
+    return greeting_agent

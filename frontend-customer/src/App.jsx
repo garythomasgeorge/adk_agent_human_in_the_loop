@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Sparkles, XCircle, Clock } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import StepCard from './StepCard';
+import './StepCard.css';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -7,7 +11,48 @@ function App() {
   const [ws, setWs] = useState(null);
   const [clientId] = useState(`customer-${Math.random().toString(36).substr(2, 9)}`);
   const [isAgentConnected, setIsAgentConnected] = useState(false);
+  const [completedSteps, setCompletedSteps] = useState({});
+  const [currentStepIndex, setCurrentStepIndex] = useState({});
   const messagesEndRef = useRef(null);
+
+  // Parse steps from markdown content
+  const parseSteps = (content) => {
+    const stepRegex = /(\d+)\. \*\*([^*]+)\*\*:?\s*([\s\S]*?)(?=\n\d+\. \*\*|$)/g;
+    const steps = [];
+    let match;
+    while ((match = stepRegex.exec(content)) !== null) {
+      steps.push({
+        number: match[1],
+        title: match[2].trim(),
+        description: match[3].trim()
+      });
+    }
+    return steps;
+  };
+
+  // Check if content contains step-by-step instructions
+  const isStepByStep = (content) => {
+    return /\d+\. \*\*/.test(content);
+  };
+
+  // Toggle step completion and advance to next step
+  const toggleStepComplete = (messageIndex, stepIndex, totalSteps) => {
+    const key = `${messageIndex}-${stepIndex}`;
+    const wasCompleted = completedSteps[key];
+
+    setCompletedSteps(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+
+    // If marking as complete and not the last step, advance to next
+    if (!wasCompleted && stepIndex < totalSteps - 1) {
+      setCurrentStepIndex(prev => ({
+        ...prev,
+        [messageIndex]: stepIndex + 1
+      }));
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -114,9 +159,14 @@ function App() {
             const isAgent = msg.sender === 'agent';
             const isBot = msg.sender === 'bot';
 
+            // Check if bot message contains steps
+            const hasSteps = isBot && isStepByStep(msg.content);
+            const steps = hasSteps ? parseSteps(msg.content) : [];
+            const currentStep = currentStepIndex[idx] || 0;
+
             return (
               <div key={idx} className={`flex ${isCustomer ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex flex-col max-w-[80%] sm:max-w-[70%] ${isCustomer ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col ${hasSteps ? 'w-full' : 'max-w-[80%] sm:max-w-[70%]'} ${isCustomer ? 'items-end' : 'items-start'}`}>
 
                   {/* Sender Name (Optional, good for Agent) */}
                   {!isCustomer && (
@@ -125,19 +175,48 @@ function App() {
                     </span>
                   )}
 
-                  <div className={`px-5 py-3.5 text-[15px] leading-relaxed shadow-sm relative group ${isCustomer
-                    ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
-                    : isAgent
-                      ? 'bg-purple-600 text-white rounded-2xl rounded-tl-sm' // Agent Style
-                      : 'bg-white text-slate-700 border border-slate-200 rounded-2xl rounded-tl-sm' // Bot Style
-                    }`}>
-                    {msg.content}
-                  </div>
+                  {hasSteps ? (
+                    // Render step-by-step instructions (progressive reveal)
+                    <div className="w-full">
+                      {steps.map((step, stepIdx) => {
+                        // Only show current step and completed steps
+                        const isVisible = stepIdx <= currentStep;
+                        if (!isVisible) return null;
+
+                        return (
+                          <StepCard
+                            key={stepIdx}
+                            step={step}
+                            index={stepIdx}
+                            totalSteps={steps.length}
+                            isCompleted={completedSteps[`${idx}-${stepIdx}`] || false}
+                            onToggleComplete={(stepIndex) => toggleStepComplete(idx, stepIndex, steps.length)}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // Regular message bubble
+                    <div className={`px-5 py-3.5 text-[15px] leading-relaxed shadow-sm relative group ${isCustomer
+                      ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
+                      : isAgent
+                        ? 'bg-purple-600 text-white rounded-2xl rounded-tl-sm' // Agent Style
+                        : 'bg-white text-slate-700 border border-slate-200 rounded-2xl rounded-tl-sm' // Bot Style
+                      }`}>
+                      {isBot ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      ) : (
+                        msg.content
+                      )}
+                    </div>
+                  )}
 
                   {/* Timestamp */}
-                  <div className={`mt-1 flex items-center gap-1 text-[10px] text-slate-400 ${isCustomer ? 'mr-1' : 'ml-1'}`}>
-                    <span>{msg.timestamp}</span>
-                  </div>
+                  {!hasSteps && (
+                    <div className={`mt-1 flex items-center gap-1 text-[10px] text-slate-400 ${isCustomer ? 'mr-1' : 'ml-1'}`}>
+                      <span>{msg.timestamp}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
