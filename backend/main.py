@@ -43,6 +43,7 @@ class ConnectionManager:
         self.session_messages: Dict[str, List[Dict]] = {} # Store messages for active sessions
         self.active_approvals: Dict[str, Dict] = {} # Store active approval requests
         self.active_agent_names: Dict[str, str] = {} # Track active agent per client
+        self.session_metadata: Dict[str, Dict] = {} # Track session status and metadata
 
     async def connect(self, websocket: WebSocket, client_id: str, role: str):
         await websocket.accept()
@@ -53,12 +54,20 @@ class ConnectionManager:
                 "type": "sync_state",
                 "active_chats": list(self.session_messages.keys()),
                 "messages": self.session_messages,
-                "approvals": self.active_approvals
+                "approvals": self.active_approvals,
+                "metadata": self.session_metadata
             })
         else:
             self.active_connections[client_id] = websocket
             if client_id not in self.session_messages:
                 self.session_messages[client_id] = []
+                # Initialize metadata
+                self.session_metadata[client_id] = {
+                    "status": "bot_only",
+                    "last_activity": None,
+                    "sentiment_score": 0.0,
+                    "requires_approval": False
+                }
 
     def disconnect(self, websocket: WebSocket, client_id: str, role: str):
         if role == "agent":
@@ -86,17 +95,37 @@ class ConnectionManager:
         if client_id not in self.session_messages:
             self.session_messages[client_id] = []
         # Add timestamp if missing or None
+        import datetime
         if 'timestamp' not in message or message['timestamp'] is None:
-            import datetime
             message['timestamp'] = datetime.datetime.now().isoformat()
         self.session_messages[client_id].append(message)
         
+        # Update last activity
+        if client_id in self.session_metadata:
+            self.session_metadata[client_id]["last_activity"] = message['timestamp']
+        
     def add_approval(self, client_id: str, approval_data: dict):
         self.active_approvals[client_id] = approval_data
+        if client_id in self.session_metadata:
+            self.session_metadata[client_id]["requires_approval"] = True
+            # Approval implies hard handoff/blocking
+            self.session_metadata[client_id]["status"] = "hard_handoff"
         
     def remove_approval(self, client_id: str):
         if client_id in self.active_approvals:
             del self.active_approvals[client_id]
+        if client_id in self.session_metadata:
+            self.session_metadata[client_id]["requires_approval"] = False
+            # If status was hard_handoff due to approval, revert to bot_only or keep as is?
+            # Usually after approval, bot continues, so maybe revert to bot_only unless agent took over
+            if self.session_metadata[client_id]["status"] == "hard_handoff":
+                 self.session_metadata[client_id]["status"] = "bot_only"
+
+    def update_session_status(self, client_id: str, status: str, sentiment: float = None):
+        if client_id in self.session_metadata:
+            self.session_metadata[client_id]["status"] = status
+            if sentiment is not None:
+                self.session_metadata[client_id]["sentiment_score"] = sentiment
 
     def get_messages(self, client_id: str) -> List[Dict]:
         return self.session_messages.get(client_id, [])
@@ -113,6 +142,8 @@ class ConnectionManager:
                 del self.active_approvals[client_id]
             if client_id in self.active_agent_names:
                 del self.active_agent_names[client_id]
+            if client_id in self.session_metadata:
+                del self.session_metadata[client_id]
             if client_id in self.active_connections:
                  # Optionally close connection or notify client
                  pass
@@ -199,6 +230,7 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                                     "amount": part.function_call.args.get("amount"),
                                     "reason": part.function_call.args.get("reason")
                                 }
+                                manager.add_approval(client_id, approval_data)
                                 await manager.broadcast_to_agents(approval_data)
                             elif part.function_call.name == "request_tech_dispatch":
                                 approval_data = {
@@ -207,7 +239,27 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                                     "amount": 0,
                                     "reason": part.function_call.args.get("reason")
                                 }
+                                manager.add_approval(client_id, approval_data)
                                 await manager.broadcast_to_agents(approval_data)
+                            elif part.function_call.name == "trigger_soft_handoff":
+                                handoff_data = {
+                                    "type": "soft_handoff",
+                                    "clientId": client_id,
+                                    "reason": part.function_call.args.get("reason"),
+                                    "sentimentScore": part.function_call.args.get("sentiment_score")
+                                }
+                                manager.update_session_status(client_id, "soft_handoff", part.function_call.args.get("sentiment_score"))
+                                await manager.broadcast_to_agents(handoff_data)
+                                await manager.send_to_client(client_id, {"type": "status_change", "status": "soft_handoff"})
+                            elif part.function_call.name == "trigger_hard_handoff":
+                                handoff_data = {
+                                    "type": "hard_handoff",
+                                    "clientId": client_id,
+                                    "reason": part.function_call.args.get("reason")
+                                }
+                                manager.update_session_status(client_id, "hard_handoff")
+                                await manager.broadcast_to_agents(handoff_data)
+                                await manager.send_to_client(client_id, {"type": "status_change", "status": "hard_handoff"})
 
             except Exception as e:
                 print(f"Error processing event: {e}")
@@ -416,6 +468,45 @@ async def serve_customer(full_path: str = ""):
     if os.path.exists(customer_index):
         return FileResponse(customer_index)
     return {"error": "Customer app not built"}
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(check_inactive_sessions())
+
+async def check_inactive_sessions():
+    """Background task to archive inactive sessions."""
+    while True:
+        try:
+            await asyncio.sleep(60) # Check every minute
+            
+            current_time = datetime.datetime.now()
+            inactive_threshold = datetime.timedelta(minutes=15)
+            
+            # Create a list of clients to remove to avoid modifying dict during iteration
+            clients_to_archive = []
+            
+            for client_id, metadata in manager.session_metadata.items():
+                # Only archive bot_only sessions automatically
+                if metadata.get("status") == "bot_only":
+                    last_activity_str = metadata.get("last_activity")
+                    if last_activity_str:
+                        last_activity = datetime.datetime.fromisoformat(last_activity_str)
+                        if current_time - last_activity > inactive_threshold:
+                            clients_to_archive.append(client_id)
+            
+            for client_id in clients_to_archive:
+                print(f"Auto-archiving inactive session: {client_id}")
+                manager.end_session(client_id)
+                # Notify agents
+                await manager.broadcast_to_agents({
+                    "type": "session_ended",
+                    "clientId": client_id,
+                    "reason": "inactivity"
+                })
+                
+        except Exception as e:
+            print(f"Error in auto-archive task: {e}")
+            await asyncio.sleep(60) # Wait before retrying
 
 if __name__ == "__main__":
     import uvicorn

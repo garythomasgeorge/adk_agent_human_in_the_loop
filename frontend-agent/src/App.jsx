@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, CheckCircle, XCircle, AlertCircle, User, Send, Clock, Shield, Activity, Search, Menu, Bell, History, X, ShieldCheck } from 'lucide-react';
+import { MessageSquare, CheckCircle, XCircle, AlertCircle, User, Send, Clock, Shield, Activity, Search, Menu, Bell, History, X, ShieldCheck, Eye, MessageCircle } from 'lucide-react';
+import ApprovalCard from './ApprovalCard';
 
 function App() {
   const [activeChats, setActiveChats] = useState([]);
@@ -8,6 +9,7 @@ function App() {
   const [ws, setWs] = useState(null);
   const [clientId] = useState(`agent-${Math.random().toString(36).substr(2, 9)}`);
   const [approvalRequests, setApprovalRequests] = useState({});
+  const [sessionMetadata, setSessionMetadata] = useState({});
   const [view, setView] = useState('active'); // 'active' or 'history'
   const [historySessions, setHistorySessions] = useState([]);
   const [historyDetail, setHistoryDetail] = useState(null);
@@ -29,44 +31,102 @@ function App() {
     socket.onopen = () => console.log('Agent Connected');
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
+
       if (data.type === 'message') {
         const chatClientId = data.clientId;
-        setActiveChats(prev => !prev.includes(chatClientId) ? [...prev, chatClientId] : prev);
         setMessages(prev => ({
           ...prev,
           [chatClientId]: [...(prev[chatClientId] || []), { sender: data.sender, content: data.content, timestamp: data.timestamp || new Date().toLocaleTimeString() }]
+        }));
+
+        // Update last activity in metadata
+        setSessionMetadata(prev => ({
+          ...prev,
+          [chatClientId]: {
+            ...prev[chatClientId],
+            last_activity: new Date().toISOString()
+          }
         }));
       } else if (data.type === 'approval_request') {
         const chatClientId = data.clientId;
         setApprovalRequests(prev => ({
           ...prev,
-          [chatClientId]: { amount: data.amount, reason: data.reason }
+          [chatClientId]: { amount: data.amount, reason: data.reason, type: data.amount > 0 ? 'credit' : 'dispatch' }
         }));
-        setActiveChats(prev => !prev.includes(chatClientId) ? [...prev, chatClientId] : prev);
+        // Update metadata to hard handoff
+        setSessionMetadata(prev => ({
+          ...prev,
+          [chatClientId]: {
+            ...prev[chatClientId],
+            status: 'hard_handoff',
+            requires_approval: true
+          }
+        }));
+      } else if (data.type === 'soft_handoff') {
+        const chatClientId = data.clientId;
+        setSessionMetadata(prev => ({
+          ...prev,
+          [chatClientId]: {
+            ...prev[chatClientId],
+            status: 'soft_handoff',
+            sentiment_score: data.sentimentScore,
+            reason: data.reason
+          }
+        }));
+      } else if (data.type === 'hard_handoff') {
+        const chatClientId = data.clientId;
+        setSessionMetadata(prev => ({
+          ...prev,
+          [chatClientId]: {
+            ...prev[chatClientId],
+            status: 'hard_handoff',
+            reason: data.reason
+          }
+        }));
       } else if (data.type === 'sync_state') {
-        setActiveChats(data.active_chats);
         setMessages(data.messages);
+        setSessionMetadata(data.metadata || {});
 
-        // Map approvals to simpler format if needed, or just use as is
+        // Map approvals
         const approvals = {};
         Object.keys(data.approvals).forEach(key => {
           approvals[key] = {
             amount: data.approvals[key].amount,
-            reason: data.approvals[key].reason
+            reason: data.approvals[key].reason,
+            type: data.approvals[key].amount > 0 ? 'credit' : 'dispatch'
           };
         });
         setApprovalRequests(approvals);
       } else if (data.type === 'session_ended') {
         const chatClientId = data.clientId;
-        setActiveChats(prev => prev.filter(id => id !== chatClientId));
+        setSessionMetadata(prev => {
+          const newState = { ...prev };
+          delete newState[chatClientId];
+          return newState;
+        });
         if (selectedChatId === chatClientId) setSelectedChatId(null);
-        // Refresh history if open
         if (view === 'history') fetchHistory();
       }
     };
     setWs(socket);
     return () => socket.close();
   }, [clientId, selectedChatId, view]);
+
+  // Filter active chats based on metadata
+  useEffect(() => {
+    const filteredChats = Object.keys(sessionMetadata).filter(id => {
+      const meta = sessionMetadata[id];
+      // Show if: soft_handoff, hard_handoff, agent_active, or requires_approval
+      // Hide if: bot_only (unless specifically debugging, but req says hide)
+      return meta && (
+        meta.status === 'soft_handoff' ||
+        meta.status === 'hard_handoff' ||
+        meta.status === 'agent_active' ||
+        meta.requires_approval
+      );
+    });
+    setActiveChats(filteredChats);
+  }, [sessionMetadata]);
 
   const handleApproval = (approved, targetClientId) => {
     if (!ws) return;
@@ -76,24 +136,79 @@ function App() {
       delete newState[targetClientId];
       return newState;
     });
+    // Reset status to bot_only if approved/declined (unless agent took over)
+    setSessionMetadata(prev => ({
+      ...prev,
+      [targetClientId]: {
+        ...prev[targetClientId],
+        status: 'bot_only',
+        requires_approval: false
+      }
+    }));
   };
 
   const handleTakeover = (e) => {
     e.preventDefault();
     const input = e.target.elements.message.value;
     if (!input.trim() || !selectedChatId || !ws) return;
+
     ws.send(JSON.stringify({ type: 'takeover_message', targetClientId: selectedChatId, content: input }));
+
     setMessages(prev => ({
       ...prev,
       [selectedChatId]: [...(prev[selectedChatId] || []), { sender: 'agent', content: input, timestamp: new Date().toLocaleTimeString() }]
     }));
+
+    // Update status to agent_active
+    setSessionMetadata(prev => ({
+      ...prev,
+      [selectedChatId]: {
+        ...prev[selectedChatId],
+        status: 'agent_active'
+      }
+    }));
+
+    // Clear approval request if taking over
+    if (approvalRequests[selectedChatId]) {
+      setApprovalRequests(prev => {
+        const newState = { ...prev };
+        delete newState[selectedChatId];
+        return newState;
+      });
+    }
+
     e.target.reset();
   }
+
+  const handleManualTakeover = (chatId) => {
+    if (!ws) return;
+    // Just update status locally and maybe send a system message?
+    setSessionMetadata(prev => ({
+      ...prev,
+      [chatId]: {
+        ...prev[chatId],
+        status: 'agent_active'
+      }
+    }));
+    // Clear approval if exists
+    if (approvalRequests[chatId]) {
+      setApprovalRequests(prev => {
+        const newState = { ...prev };
+        delete newState[chatId];
+        return newState;
+      });
+    }
+  };
 
   const handleEndSession = () => {
     if (!selectedChatId || !ws) return;
     ws.send(JSON.stringify({ type: 'end_session', targetClientId: selectedChatId }));
-    setActiveChats(prev => prev.filter(id => id !== selectedChatId));
+    // Optimistic update
+    setSessionMetadata(prev => {
+      const newState = { ...prev };
+      delete newState[selectedChatId];
+      return newState;
+    });
     setSelectedChatId(null);
   }
 
@@ -135,7 +250,6 @@ function App() {
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight">Nebula Agent Hub</h1>
           </div>
-          <div className="flex items-center gap-4"></div>
         </header>
 
         {/* View Toggle */}
@@ -145,6 +259,7 @@ function App() {
             className={`py-2 text-xs font-medium rounded-md transition-colors ${view === 'active' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
           >
             Active Queue
+            {activeChats.length > 0 && <span className="ml-2 bg-white/20 px-1.5 rounded-full text-[10px]">{activeChats.length}</span>}
           </button>
           <button
             onClick={() => setView('history')}
@@ -158,43 +273,57 @@ function App() {
         <div className="flex-1 overflow-y-auto">
           {view === 'active' ? (
             <div className="space-y-0.5 px-2 py-2">
-              {activeChats.map(id => (
-                <button
-                  key={id}
-                  onClick={() => setSelectedChatId(id)}
-                  className={`w-full text-left p-3 rounded-md flex items-center justify-between group transition-all duration-200 ${selectedChatId === id
-                    ? 'bg-blue-600/10 border border-blue-500/50 shadow-sm'
-                    : 'hover:bg-slate-800 border border-transparent'
-                    }`}
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 font-medium border border-slate-600">
-                        {id.substr(0, 2).toUpperCase()}
+              {activeChats.map(id => {
+                const meta = sessionMetadata[id] || {};
+                const isHardHandoff = meta.status === 'hard_handoff';
+                const isSoftHandoff = meta.status === 'soft_handoff';
+                const isApproval = approvalRequests[id];
+
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setSelectedChatId(id)}
+                    className={`w-full text-left p-3 rounded-md flex items-center justify-between group transition-all duration-200 ${selectedChatId === id
+                      ? 'bg-blue-600/10 border border-blue-500/50 shadow-sm'
+                      : 'hover:bg-slate-800 border border-transparent'
+                      }`}
+                  >
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 font-medium border border-slate-600">
+                          {id.substr(0, 2).toUpperCase()}
+                        </div>
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#1E293B] ${isHardHandoff || isApproval ? 'bg-red-500 animate-pulse' :
+                            isSoftHandoff ? 'bg-orange-500' : 'bg-green-500'
+                          }`}></div>
                       </div>
-                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#1E293B] ${approvalRequests[id] ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium truncate ${selectedChatId === id ? 'text-blue-400' : 'text-slate-200 group-hover:text-white'}`}>
+                          {id}
+                        </div>
+                        <div className="text-xs text-slate-500 truncate flex items-center gap-1">
+                          {isApproval ? (
+                            <span className="text-red-400 flex items-center gap-1 font-semibold"><AlertCircle size={10} /> Approval Needed</span>
+                          ) : isHardHandoff ? (
+                            <span className="text-red-400 flex items-center gap-1 font-semibold"><AlertCircle size={10} /> Action Required</span>
+                          ) : isSoftHandoff ? (
+                            <span className="text-orange-400 flex items-center gap-1 font-medium"><Eye size={10} /> Monitoring</span>
+                          ) : (
+                            <span className="flex items-center gap-1"><Activity size={10} /> Active Session</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium truncate ${selectedChatId === id ? 'text-blue-400' : 'text-slate-200 group-hover:text-white'}`}>
-                        {id}
-                      </div>
-                      <div className="text-xs text-slate-500 truncate flex items-center gap-1">
-                        {approvalRequests[id] ? (
-                          <span className="text-red-400 flex items-center gap-1 font-semibold"><AlertCircle size={10} /> Approval Needed</span>
-                        ) : (
-                          <span className="flex items-center gap-1"><Activity size={10} /> Active Session</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
               {activeChats.length === 0 && (
                 <div className="text-center py-12">
                   <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-600">
                     <MessageSquare size={24} />
                   </div>
-                  <p className="text-slate-500 text-sm">No active sessions</p>
+                  <p className="text-slate-500 text-sm">No sessions requiring attention</p>
+                  <p className="text-slate-600 text-xs mt-1">Bot is handling all active chats</p>
                 </div>
               )}
             </div>
@@ -234,10 +363,19 @@ function App() {
               <div>
                 <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                   {view === 'active' ? selectedChatId : historyDetail.client_id}
-                  {view === 'active' && approvalRequests[selectedChatId] && (
-                    <span className="bg-red-500/20 text-red-400 px-2 py-0.5 rounded text-xs border border-red-500/30 font-medium">
-                      Approval Needed
-                    </span>
+                  {view === 'active' && (
+                    <>
+                      {approvalRequests[selectedChatId] && (
+                        <span className="bg-red-500/20 text-red-400 px-2 py-0.5 rounded text-xs border border-red-500/30 font-medium">
+                          Approval Needed
+                        </span>
+                      )}
+                      {sessionMetadata[selectedChatId]?.status === 'soft_handoff' && (
+                        <span className="bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded text-xs border border-orange-500/30 font-medium flex items-center gap-1">
+                          <Eye size={12} /> Monitoring
+                        </span>
+                      )}
+                    </>
                   )}
                   {view === 'history' && (
                     <span className="bg-slate-700 text-slate-300 px-2 py-0.5 rounded text-xs border border-slate-600">
@@ -247,12 +385,22 @@ function App() {
                 </h2>
               </div>
               {view === 'active' && (
-                <button
-                  onClick={handleEndSession}
-                  className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs rounded border border-red-500/30 transition-colors flex items-center gap-2"
-                >
-                  <XCircle size={14} /> End Session
-                </button>
+                <div className="flex items-center gap-2">
+                  {sessionMetadata[selectedChatId]?.status === 'soft_handoff' && (
+                    <button
+                      onClick={() => handleManualTakeover(selectedChatId)}
+                      className="px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 text-xs rounded border border-blue-600/30 transition-colors flex items-center gap-2"
+                    >
+                      <MessageCircle size={14} /> Take Over
+                    </button>
+                  )}
+                  <button
+                    onClick={handleEndSession}
+                    className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs rounded border border-red-500/30 transition-colors flex items-center gap-2"
+                  >
+                    <XCircle size={14} /> End Session
+                  </button>
+                </div>
               )}
             </header>
 
@@ -313,67 +461,13 @@ function App() {
 
               {/* Approval Modal Overlay */}
               {view === 'active' && approvalRequests[selectedChatId] && (
-                <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                  <div className="bg-[#1E293B] border border-slate-700 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-                    <div className="p-6">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
-                          <AlertCircle size={24} />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-white">Approval Required</h3>
-                          <p className="text-sm text-slate-400">Bot has paused for manual review</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 mb-6">
-                        <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-                          <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Request</div>
-                          <div className="text-white font-medium">Billing Credit</div>
-                          <div className="text-2xl font-bold text-white mt-1">${approvalRequests[selectedChatId].amount.toFixed(2)}</div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Reason</div>
-                          <p className="text-slate-300 text-sm leading-relaxed">
-                            {approvalRequests[selectedChatId].reason}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => handleApproval(false, selectedChatId)}
-                          className="py-2.5 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
-                        >
-                          Decline
-                        </button>
-                        <button
-                          onClick={() => handleApproval(true, selectedChatId)}
-                          className="py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium shadow-lg shadow-blue-500/20 transition-colors"
-                        >
-                          Approve
-                        </button>
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-slate-700 text-center">
-                        <p className="text-xs text-slate-500 mb-2">Or take control manually</p>
-                        <button
-                          onClick={() => {
-                            // Just close modal to allow typing
-                            setApprovalRequests(prev => {
-                              const newState = { ...prev };
-                              delete newState[selectedChatId];
-                              return newState;
-                            });
-                          }}
-                          className="text-sm text-blue-400 hover:text-blue-300 font-medium"
-                        >
-                          Take Over Chat
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <ApprovalCard
+                  type={approvalRequests[selectedChatId].type}
+                  data={approvalRequests[selectedChatId]}
+                  onApprove={() => handleApproval(true, selectedChatId)}
+                  onDecline={() => handleApproval(false, selectedChatId)}
+                  onTakeover={() => handleManualTakeover(selectedChatId)}
+                />
               )}
             </div>
           </>

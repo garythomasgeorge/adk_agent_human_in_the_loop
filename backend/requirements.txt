@@ -1,7 +1,7 @@
-git+https://github.com/google/adk-python.git
-fastapi==0.104.1
-uvicorn==0.24.0
-websockets==12.0
-python-multipart==0.0.6
+git+https://github.com/google/adk-python.git@786aaed335e1ce64b7e92dff2f4af8316b2ef593
+fastapi>=0.110.0
+uvicorn>=0.27.0
+websockets>=15.0.1
+python-multipart>=0.0.9
 python-dotenv
 

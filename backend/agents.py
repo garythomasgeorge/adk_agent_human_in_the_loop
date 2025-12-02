@@ -51,6 +51,40 @@ def request_tech_dispatch(reason: str) -> dict:
         "response": f"I need to send a technician to your location. Let me get supervisor approval for the dispatch."
     }
 
+def trigger_soft_handoff(reason: str, sentiment_score: float) -> dict:
+    """
+    Signal that a human agent should monitor this conversation.
+    
+    Args:
+        reason: Why monitoring is needed (e.g. "customer frustration", "complex issue")
+        sentiment_score: Estimated sentiment (0.0-1.0, where 0 is negative)
+        
+    Returns:
+        dict with handoff details
+    """
+    return {
+        "handoff_type": "soft",
+        "reason": reason,
+        "sentiment_score": sentiment_score,
+        "response": "I understand this is frustrating. Let me see what I can do to help."
+    }
+
+def trigger_hard_handoff(reason: str) -> dict:
+    """
+    Request immediate human agent takeover.
+    
+    Args:
+        reason: Why takeover is needed (e.g. "customer requested manager", "escalation")
+        
+    Returns:
+        dict with handoff details
+    """
+    return {
+        "handoff_type": "hard",
+        "reason": reason,
+        "response": "I'm going to connect you with a human agent who can better assist you. Please hold on a moment."
+    }
+
 
 # Create ADK Tools
 credit_approval_tool = FunctionTool(
@@ -59,6 +93,14 @@ credit_approval_tool = FunctionTool(
 
 tech_dispatch_tool = FunctionTool(
     func=request_tech_dispatch
+)
+
+soft_handoff_tool = FunctionTool(
+    func=trigger_soft_handoff
+)
+
+hard_handoff_tool = FunctionTool(
+    func=trigger_hard_handoff
 )
 
 
@@ -186,14 +228,17 @@ Your responsibilities:
 For credit requests:
 1. Listen to the customer's concern about a charge
 2. Ask clarifying questions if needed
-3. If they dispute a charge (movie rental, service fee, etc.), use the request_credit_approval tool
-4. The tool will submit the request to a supervisor for approval
-5. Let the customer know a supervisor is reviewing the request
+3. **CRITICAL**: Check the amount of the credit request.
+   - If the amount is **$5.00 or less**, you can approve it automatically. Tell the customer you've applied the credit.
+   - If the amount is **more than $5.00**, you MUST use the `request_credit_approval` tool.
+4. When using the tool, explain to the customer that a supervisor needs to review requests over $5.
+
+Handoffs:
+- If the customer seems very frustrated or asks for a manager, use `trigger_soft_handoff` (for frustration) or `trigger_hard_handoff` (for explicit manager request).
 
 Be empathetic, professional, and helpful. Always verify the charge details before requesting approval.
-For charges under $50, you can be more lenient. For larger amounts, gather more details.
 """,
-    tools=[credit_approval_tool]
+    tools=[credit_approval_tool, soft_handoff_tool, hard_handoff_tool]
 )
 
 
@@ -219,14 +264,18 @@ Troubleshooting process:
 3. If basic troubleshooting doesn't work:
    - Mention you'll run a remote system check
    - Simulate checking the line (take a moment)
-   - If there's a signal issue you can't fix remotely, use request_tech_dispatch tool
+   - If there's a signal issue you can't fix remotely, use `request_tech_dispatch` tool
 
 4. The tech dispatch tool will request supervisor approval
 5. Let the customer know a supervisor is reviewing the dispatch request
 
+Handoffs:
+- If the customer is frustrated or the issue is complex, use `trigger_soft_handoff`.
+- If they demand a supervisor, use `trigger_hard_handoff`.
+
 Be patient, technical but not overly complex, and reassuring. Guide them through each step clearly.
 """,
-    tools=[tech_dispatch_tool]
+    tools=[tech_dispatch_tool, soft_handoff_tool, hard_handoff_tool]
 )
 
 

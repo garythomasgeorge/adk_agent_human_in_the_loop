@@ -3,6 +3,7 @@ import { Send, Bot, User, Sparkles, XCircle, Clock } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import StepCard from './StepCard';
+import CountdownTimer from './CountdownTimer';
 import './StepCard.css';
 
 function App() {
@@ -13,6 +14,8 @@ function App() {
   const [isAgentConnected, setIsAgentConnected] = useState(false);
   const [completedSteps, setCompletedSteps] = useState({});
   const [currentStepIndex, setCurrentStepIndex] = useState({});
+  const [sessionStatus, setSessionStatus] = useState('bot_only'); // bot_only, soft_handoff, hard_handoff, agent_active
+
   const messagesEndRef = useRef(null);
 
   // Parse steps from markdown content
@@ -33,6 +36,23 @@ function App() {
   // Check if content contains step-by-step instructions
   const isStepByStep = (content) => {
     return /\d+\. \*\*/.test(content);
+  };
+
+  // Check if message indicates processing/waiting
+  const isProcessingMessage = (content) => {
+    const processingKeywords = [
+      'one moment',
+      'please wait',
+      'pulling up',
+      'checking',
+      'looking into',
+      'let me check',
+      'give me a moment',
+      'just a moment',
+      'working on'
+    ];
+    const lowerContent = content.toLowerCase();
+    return processingKeywords.some(keyword => lowerContent.includes(keyword));
   };
 
   // Toggle step completion and advance to next step
@@ -81,12 +101,27 @@ function App() {
       const data = JSON.parse(event.data);
       if (data.sender === 'agent' || (data.sender === 'system' && data.content.includes('Agent has joined'))) {
         setIsAgentConnected(true);
+        setSessionStatus('agent_active');
       }
+
+      if (data.type === 'status_change') {
+        setSessionStatus(data.status);
+        return;
+      }
+
+      const messageIndex = messages.length;
+      const isProcessing = data.sender === 'bot' && isProcessingMessage(data.content);
+
       setMessages(prev => [...prev, {
         sender: data.sender,
         content: data.content,
         timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
+
+      // Show countdown for processing messages
+      if (isProcessing) {
+        setShowCountdown(prev => ({ ...prev, [messageIndex]: true }));
+      }
     };
 
     setWs(socket);
@@ -113,6 +148,7 @@ function App() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
     setIsAgentConnected(false);
+    setSessionStatus('bot_only');
     // Optional: Disable input or show restart button
   };
 
@@ -122,7 +158,12 @@ function App() {
       <header className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 shadow-sm">
         <div className="w-[60%] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="text-blue-600" size={24} />
+            <div className="relative">
+              <Sparkles className="text-blue-600" size={24} />
+              {sessionStatus === 'agent_active' && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white"></span>
+              )}
+            </div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight">Nebula Assistant</h1>
           </div>
           <div className="flex items-center gap-4">
@@ -138,6 +179,25 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* Status Banners */}
+      {sessionStatus === 'soft_handoff' && (
+        <div className="bg-blue-50 border-b border-blue-100 px-6 py-2">
+          <div className="w-[60%] mx-auto flex items-center gap-2 text-sm text-blue-700">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+            An agent is monitoring this conversation to ensure you get the best help.
+          </div>
+        </div>
+      )}
+
+      {sessionStatus === 'hard_handoff' && (
+        <div className="bg-amber-50 border-b border-amber-100 px-6 py-2">
+          <div className="w-[60%] mx-auto flex items-center gap-2 text-sm text-amber-700 font-medium">
+            <Clock size={14} className="animate-spin-slow" />
+            Connecting you with a human agent...
+          </div>
+        </div>
+      )}
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent">
@@ -166,12 +226,13 @@ function App() {
 
             return (
               <div key={idx} className={`flex ${isCustomer ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex flex-col ${hasSteps ? 'w-full' : 'max-w-[80%] sm:max-w-[70%]'} ${isCustomer ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col ${hasSteps ? 'w-full' : 'max-w-[80%] sm:max-w-[70%]'} ${isCustomer ? 'items-end' : 'items-start'} ${isAgent ? 'items-start' : ''}`}>
 
                   {/* Sender Name (Optional, good for Agent) */}
                   {!isCustomer && (
-                    <span className="text-xs text-slate-400 mb-1 ml-1">
-                      {isAgent ? 'Agent' : 'Virtual Assistant'}
+                    <span className="text-xs text-slate-400 mb-1 ml-1 flex items-center gap-1">
+                      {isAgent ? <User size={10} /> : <Bot size={10} />}
+                      {isAgent ? 'Human Agent' : 'Virtual Assistant'}
                     </span>
                   )}
 
@@ -209,6 +270,14 @@ function App() {
                         msg.content
                       )}
                     </div>
+                  )}
+
+                  {/* Countdown Timer for Processing Messages */}
+                  {!hasSteps && isBot && showCountdown[idx] && (
+                    <CountdownTimer
+                      duration={45}
+                      onComplete={() => setShowCountdown(prev => ({ ...prev, [idx]: false }))}
+                    />
                   )}
 
                   {/* Timestamp */}
