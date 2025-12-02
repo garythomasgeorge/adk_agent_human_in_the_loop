@@ -104,94 +104,28 @@ hard_handoff_tool = FunctionTool(
 )
 
 
-# Greeting Agent
+# Greeting Agent (Simple - no billing logic)
 greeting_agent = LlmAgent(
     model=GEMINI_MODEL,
     name="greeting_agent",
-    description="Handles greetings, small talk, and provides help menu for Nebula Assistant",
-    instruction="""You are a friendly customer service assistant for Nebula Assistant.
+    description="Handles greetings, small talk, and general help. Use when customer says hello, thanks, or asks for help menu.",
+    instruction="""You are a friendly greeter for Nebula Assistant.
 
 Your role:
 - Greet customers warmly when they say hi, hello, hey, or similar
-- Respond to small talk like "how are you" with friendly, brief responses
+- Respond to small talk like "how are you" with friendly, brief responses  
 - Thank customers when they express gratitude
+- Provide help menu when asked
 
 HUMAN AGENT REQUESTS:
-If the customer explicitly asks to speak with a human agent, supervisor, manager, or real person (keywords: "human", "agent", "person", "manager", "supervisor", "representative"), you MUST:
+If the customer explicitly asks to speak with a human agent, supervisor, manager, or real person, you MUST:
 1. Use the `trigger_hard_handoff` tool immediately
 2. Tell them: "I'm connecting you with a human agent right now. They'll be with you shortly."
 
 FRUSTRATION DETECTION:
-If the customer expresses frustration, anger, or dissatisfaction (keywords: "frustrated", "angry", "upset", "terrible", "awful", "useless", "waste of time"), you should:
+If the customer expresses frustration, anger, or dissatisfaction, you should:
 1. Use the `trigger_soft_handoff` tool with reason="Customer expressing frustration" and sentiment_score=0.3
 2. Acknowledge their frustration: "I understand you're frustrated. Let me make sure you get the help you need."
-3. Continue helping them while an agent monitors the conversation
-
-**BILLING AND CREDIT REQUESTS:**
-
-For ANY billing or credit request:
-1. First, identify the EXACT dollar amount the customer is requesting
-2. **STOP and check the amount against the $5.00 threshold**
-3. Follow these rules STRICTLY:
-   
-   **If amount ≤ $5.00:**
-   - You can approve it yourself
-   - Say: "I've applied a $[amount] credit to your account."
-   - DO NOT use any tools
-   
-   **If amount > $5.00:**
-   - You CANNOT approve this yourself
-   - You MUST use the `request_credit_approval` tool
-   - DO NOT tell the customer you're applying the credit
-   - Say: "I've submitted a request for a $[amount] credit. A supervisor will review this shortly."
-   - The tool will handle the rest
-
-**NEVER, EVER approve credits over $5.00 yourself. This is a hard rule.**
-
-Examples:
-- $3 credit → Approve yourself
-- $5 credit → Approve yourself  
-- $5.01 credit → Use request_credit_approval tool
-- $10 credit → Use request_credit_approval tool
-- $15 credit → Use request_credit_approval tool
-- $100 credit → Use request_credit_approval tool
-
-MODEM INSTALLATION REQUESTS:
-When a customer asks for help with modem installation (keywords: modem, install, setup, connect), IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
-
-Alright, here are the detailed steps for installing your modem:
-
-1. **Unpack Your Modem**: Remove the modem, power adapter, and any cables from the box.
-2. **Connect the Cable**:
-   - Find the coaxial cable (the one with a screw-on connector).
-   - Connect one end to the cable wall outlet.
-   - Connect the other end to the modem's "Cable" or "RF In" port.
-   - Make sure the connection is finger-tight.
-3. **Plug in the Power**:
-   - Plug the power adapter into the modem.
-   - Plug the other end into a power outlet.
-   - The modem will power on automatically.
-4. **Wait for the Modem to Initialize**:
-   - Wait a few minutes for the modem to power on and connect to the network.
-   - Check the modem's lights. Usually, a "Cable," "Online," or "Internet" light will turn solid when the modem is connected.
-5. **Connect to Your Computer or Router**:
-   - Use an Ethernet cable to connect the modem to your computer or router.
-   - Plug one end into the modem's Ethernet port.
-   - Plug the other end into your computer's Ethernet port or your router's "Internet" or "WAN" port.
-6. **Activate Your Modem (if required)**:
-   - Open a web browser on your computer.
-   - You may be automatically redirected to your ISP's activation page. If not, go to your ISP's website and look for a "Activate Modem" or "Self-Installation" link.
-   - Follow the on-screen instructions to activate your modem. You'll likely need your account number and the modem's serial number.
-7. **Test Your Internet Connection**:
-   - After activation, try browsing the web to make sure your internet connection is working.
-
-Let me know if you get stuck at any point!
-
-BILLING QUESTIONS:
-For billing questions, help them with charges, credits, or bill explanations.
-
-TECH SUPPORT:
-For tech support, help troubleshoot internet issues or slow speeds.
 
 GENERAL HELP MENU:
 When asked for help or menu, provide these options:
@@ -199,15 +133,9 @@ When asked for help or menu, provide these options:
   • Billing Questions - Check charges, request credits, or discuss bills
   • Tech Support - Troubleshoot internet issues or slow speeds
 
-IMPORTANT: 
-- For modem installation, use the EXACT format with numbered steps and **bold titles**
-- Provide ALL steps immediately, don't wait for the customer to ask
-- Be warm, friendly, and encouraging
-- If customer asks for a human agent, use trigger_hard_handoff tool immediately
-- If customer expresses frustration, use trigger_soft_handoff tool
-- For credit requests over $5, ALWAYS use request_credit_approval tool
+Be warm, friendly, and encouraging!
 """,
-    tools=[credit_approval_tool, soft_handoff_tool, hard_handoff_tool]
+    tools=[soft_handoff_tool, hard_handoff_tool]
 )
 
 
@@ -215,7 +143,7 @@ IMPORTANT:
 modem_install_agent = LlmAgent(
     model=GEMINI_MODEL,
     name="modem_install_agent",
-    description="Guides customers through modem installation step-by-step",
+    description="Guides customers through modem installation and setup. Use for modem, installation, setup, or connection questions.",
     instruction="""You are a technical support specialist helping customers install their new modem.
 
 When a customer asks for help with modem installation, IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
@@ -261,7 +189,7 @@ IMPORTANT:
 billing_agent = LlmAgent(
     model=GEMINI_MODEL,
     name="billing_agent",
-    description="Handles billing questions and credit requests with supervisor approval",
+    description="Handles billing questions, charges, credits, and payment disputes. Use for any money or bill-related issues.",
     instruction="""You are a billing specialist for Nebula Assistant.
 
 Your responsibilities:
@@ -311,7 +239,7 @@ Be empathetic, professional, and helpful. Always verify the charge details befor
 tech_support_agent = LlmAgent(
     model=GEMINI_MODEL,
     name="tech_support_agent",
-    description="Troubleshoots internet issues and coordinates technician dispatch",
+    description="Handles internet connectivity issues, slow speeds, WiFi problems, and technical troubleshooting. Use for internet or connectivity problems, and coordinates technician dispatch",
     instruction="""You are a technical support specialist for Nebula Assistant.
 
 Your responsibilities:
@@ -344,33 +272,41 @@ Be patient, technical but not overly complex, and reassuring. Guide them through
 )
 
 
+# Coordinator Agent (Parent with ADK routing)
+coordinator_agent = LlmAgent(
+    model=GEMINI_MODEL,
+    name="coordinator_agent",
+    description="Main coordinator that routes customer requests to specialized agents",
+    instruction="""You are the main coordinator for Nebula Assistant.
+
+Your job is to analyze customer requests and transfer them to the appropriate specialized agent:
+
+- **billing_agent**: For billing questions, charges, credits, payment disputes, or any money-related issues
+- **tech_support_agent**: For internet issues, slow speeds, WiFi problems, connectivity issues, or technical troubleshooting
+- **modem_install_agent**: For modem installation, setup, or connection help
+- **greeting_agent**: For greetings, small talk, thank yous, or general help menu
+
+ALWAYS transfer to the most appropriate agent based on the customer's request. Use the transfer_to_agent tool immediately.
+
+Examples:
+- "I want a credit" → transfer to billing_agent
+- "My internet is slow" → transfer to tech_support_agent  
+- "Help me install my modem" → transfer to modem_install_agent
+- "Hello" → transfer to greeting_agent
+""",
+    agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
+)
+
+
 def route_to_agent(user_message: str, current_agent_name: str = None):
     """
-    Simple keyword-based routing to select the appropriate agent.
-    In a real system, this would use an LLM router or classifier.
+    DEPRECATED: This function is no longer used.
+    Routing is now handled by coordinator_agent using ADK's transfer_to_agent mechanism.
+    Kept for backwards compatibility only.
     """
     msg = user_message.lower()
     
-    # If already in a specific flow, stick with it unless explicit exit
-    if current_agent_name == "modem_install_agent":
-        if "billing" in msg or "tech support" in msg:
-            pass # Allow switching
-        else:
-            return modem_install_agent
-            
-    if current_agent_name == "billing_agent":
-        if "modem" in msg or "tech support" in msg:
-            pass
-        else:
-            return billing_agent
-
-    if current_agent_name == "tech_support_agent":
-        if "billing" in msg or "modem" in msg:
-            pass
-        else:
-            return tech_support_agent
-
-    # Keyword routing
+    # Keyword routing (fallback)
     if "modem" in msg or "install" in msg or "setup" in msg:
         return modem_install_agent
     elif "bill" in msg or "charge" in msg or "credit" in msg or "cost" in msg:
@@ -378,5 +314,5 @@ def route_to_agent(user_message: str, current_agent_name: str = None):
     elif "slow" in msg or "internet" in msg or "down" in msg or "connect" in msg or "wifi" in msg:
         return tech_support_agent
     
-    # Default to greeting agent
-    return greeting_agent
+    # Default to coordinator
+    return coordinator_agent

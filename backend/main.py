@@ -16,6 +16,7 @@ from google.genai.types import Content, Part, Blob, Modality
 
 # Import agents
 from agents import (
+    coordinator_agent,
     greeting_agent,
     modem_install_agent as modem_agent,
     billing_agent,
@@ -437,9 +438,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                     })
         
         elif role == "customer":
-            # 1. Determine initial agent (Greeting)
-            active_agent_name = manager.active_agent_names.get(client_id, "Greeting Agent")
-            selected_agent = greeting_agent # Default
+            # 1. Use Coordinator Agent for ADK-based routing
+            selected_agent = coordinator_agent
             
             # 2. Initialize Runner for this session
             runner = InMemoryRunner(
