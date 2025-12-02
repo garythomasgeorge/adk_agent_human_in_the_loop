@@ -377,7 +377,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                          join_msg = {
                              "sender": "system", 
                              "content": "Agent has joined the chat.",
-                             "timestamp": datetime.datetime.now().strftime("%H:%M")
+                             "timestamp": datetime.datetime.now().isoformat()
                          }
                          manager.add_message(target_client_id, join_msg)
                          await manager.send_to_client(target_client_id, join_msg)
@@ -401,7 +401,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                      agent_msg = {
                          "sender": "agent", 
                          "content": message_data["content"],
-                         "timestamp": datetime.datetime.now().strftime("%H:%M")
+                         "timestamp": datetime.datetime.now().isoformat()
                      }
                      manager.add_message(target_client_id, agent_msg)
                      

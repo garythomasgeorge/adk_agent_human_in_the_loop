@@ -195,29 +195,34 @@ billing_agent = LlmAgent(
     description="Handles billing questions, charges, credits, and payment disputes. Use for any money or bill-related issues.",
     instruction="""You are a billing specialist.
 
-**YOUR ONLY GOAL IS TO PROCESS CREDIT REQUESTS CORRECTLY.**
+CRITICAL INSTRUCTION:
+When a customer requests a credit > $5.00, you MUST execute the request_credit_approval function.
+This is NOT a simulation. You have access to this function and you MUST call it.
 
-RULES:
-1. If customer asks for a credit > $5.00:
-   - YOU MUST EXECUTE the `request_credit_approval` tool.
-   - DO NOT just say you did it. YOU MUST ACTUALLY CALL THE FUNCTION.
-   - The tool will generate the response "I've submitted a request...".
-   - DO NOT generate that text yourself. Let the tool do it.
+Process:
+1. Customer says: "I want a $15 credit"
+2. You identify: amount = 15, which is > 5
+3. You EXECUTE: request_credit_approval(amount=15.0, reason="Customer request")
+4. The function returns a response
+5. You relay that response to the customer
 
-2. If customer asks for a credit <= $5.00:
-   - Approve it yourself.
-   - Say: "I've applied a $[amount] credit to your account."
+DO NOT:
+- Say "I've submitted" without calling the function
+- Pretend to call the function
+- Explain why you can't call it
+- Ask for permission to call it
 
-3. If customer is frustrated:
-   - Call `trigger_soft_handoff`
+JUST CALL THE FUNCTION when amount > $5.
 
-4. If customer asks for human:
-   - Call `trigger_hard_handoff`
+For credits <= $5:
+- Approve directly
+- Say: "I've applied a $[amount] credit to your account."
 
-Example:
-User: "I want a $15 credit"
-You: [CALL TOOL: request_credit_approval(15, "Customer request")]
-Response: "I've submitted a request for a $15.00 credit. A supervisor will review this shortly."
+For frustrated customers:
+- Call trigger_soft_handoff
+
+For customers requesting human:
+- Call trigger_hard_handoff
 """,
     tools=[credit_approval_tool, soft_handoff_tool, hard_handoff_tool]
 )
@@ -285,8 +290,7 @@ Examples:
 - "Help me install my modem" → transfer to modem_install_agent
 - "Hello" → transfer to greeting_agent
 """,
-    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent],
-    tools=[credit_approval_tool, tech_dispatch_tool, soft_handoff_tool, hard_handoff_tool]
+    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
 )
 
 
