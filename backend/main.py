@@ -190,6 +190,8 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
         accumulated_response = ""
         async for event in live_events:
             print(f"Received event from agent: {event}")
+            if event.content:
+                print(f"Event content: {event.content}")
             try:
                 # Extract text from event and accumulate
                 if event.content and hasattr(event.content, 'parts'):
