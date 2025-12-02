@@ -146,6 +146,9 @@ modem_install_agent = LlmAgent(
     description="Guides customers through modem installation and setup. Use for modem, installation, setup, or connection questions.",
     instruction="""You are a technical support specialist helping customers install their new modem.
 
+DO NOT GREET THE CUSTOMER. Assume they have already been greeted.
+IMMEDIATELY address their modem installation request.
+
 When a customer asks for help with modem installation, IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
 
 Alright, here are the detailed steps for installing your modem:
@@ -196,10 +199,10 @@ billing_agent = LlmAgent(
 
 RULES:
 1. If customer asks for a credit > $5.00:
-   - YOU MUST CALL `request_credit_approval(amount, reason)`
-   - DO NOT argue. DO NOT explain. DO NOT say you can't.
-   - JUST CALL THE TOOL.
-   - Say: "I've submitted a request for a $[amount] credit. A supervisor will review this shortly."
+   - YOU MUST EXECUTE the `request_credit_approval` tool.
+   - DO NOT just say you did it. YOU MUST ACTUALLY CALL THE FUNCTION.
+   - The tool will generate the response "I've submitted a request...".
+   - DO NOT generate that text yourself. Let the tool do it.
 
 2. If customer asks for a credit <= $5.00:
    - Approve it yourself.
@@ -226,6 +229,9 @@ tech_support_agent = LlmAgent(
     name="tech_support_agent",
     description="Handles internet connectivity issues, slow speeds, WiFi problems, and technical troubleshooting. Use for internet or connectivity problems, and coordinates technician dispatch",
     instruction="""You are a technical support specialist for Nebula Assistant.
+
+DO NOT GREET THE CUSTOMER. Assume they have already been greeted.
+IMMEDIATELY address their technical issue.
 
 Your responsibilities:
 - Troubleshoot internet connectivity issues
@@ -279,7 +285,8 @@ Examples:
 - "Help me install my modem" → transfer to modem_install_agent
 - "Hello" → transfer to greeting_agent
 """,
-    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
+    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent],
+    tools=[credit_approval_tool, tech_dispatch_tool, soft_handoff_tool, hard_handoff_tool]
 )
 
 

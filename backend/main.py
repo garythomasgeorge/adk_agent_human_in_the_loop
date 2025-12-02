@@ -210,7 +210,7 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                     bot_msg = {
                         "sender": "bot",
                         "content": accumulated_response,
-                        "timestamp": datetime.datetime.now().strftime("%H:%M")
+                        "timestamp": datetime.datetime.now().isoformat()
                     }
                     
                     # Add to session history FIRST
