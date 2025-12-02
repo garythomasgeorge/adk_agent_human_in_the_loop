@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, CheckCircle, XCircle, AlertCircle, User, Send, Clock, Shield, Activity, Search, Menu, Bell, History, X } from 'lucide-react';
+import { MessageSquare, CheckCircle, XCircle, AlertCircle, User, Send, Clock, Shield, Activity, Search, Menu, Bell, History, X, ShieldCheck } from 'lucide-react';
 
 function App() {
   const [activeChats, setActiveChats] = useState([]);

@@ -2,6 +2,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CheckCircle2, Circle } from 'lucide-react';
+import './StepCard.css';
 
 const StepCard = ({ step, index, totalSteps, isCompleted, onToggleComplete }) => {
     const stepImages = {
