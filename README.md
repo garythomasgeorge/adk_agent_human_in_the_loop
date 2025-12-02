@@ -9,6 +9,7 @@ A proof-of-concept application demonstrating human-in-the-loop AI customer servi
 - **👥 Human-in-the-Loop**: Seamless handoffs between AI and human agents
 - **✅ Approval Workflows**: Supervisor approval for high-value actions (credits, tech dispatch)
 - **💬 Real-time Communication**: WebSocket-based bidirectional messaging
+- **✨ Rich Chat UI**: Interactive step-by-step cards with progressive reveal and markdown support
 - **📊 Chat History**: SQLite-based persistence with session management
 - **🎨 Modern UI**: React-based customer and agent interfaces with Tailwind CSS
 
@@ -46,6 +47,7 @@ The application uses a modular agent architecture:
 #### Frontend Customer (`/frontend-customer`)
 - React + Vite + Tailwind CSS
 - Real-time chat interface
+- **`StepCard.jsx`**: Interactive component for step-by-step guides
 - Visual differentiation for bot/agent/system messages
 - "End Chat" functionality
 
@@ -58,19 +60,19 @@ The application uses a modular agent architecture:
 
 ## Mock Scenarios
 
-### 1. Modem Installation (Soft Handoff)
-**Trigger**: "install modem"  
-**Flow**: Step-by-step guided setup with agent monitoring  
-**Type**: Soft handoff - agent can observe and intervene
+### 1. Modem Installation (Visual Guide)
+**Trigger**: "install modem"
+**Flow**: Interactive step-by-step cards with images and progressive reveal
+**Type**: Automated guidance with visual aids
 
 ### 2. Movie Rental Dispute (Hard Handoff)
-**Trigger**: "bill movie" → "not me"  
-**Flow**: Credit request requiring supervisor approval  
+**Trigger**: "bill movie" → "not me"
+**Flow**: Credit request requiring supervisor approval
 **Type**: Hard handoff - requires explicit approval
 
 ### 3. Internet Troubleshooting (Hard Handoff)
-**Trigger**: "internet slow" → "next"  
-**Flow**: System check → Random success/failure → Tech dispatch approval  
+**Trigger**: "internet slow" → "next"
+**Flow**: System check → Random success/failure → Tech dispatch approval
 **Type**: Hard handoff - requires approval for technician dispatch
 
 ## Setup
@@ -248,8 +250,12 @@ Returns messages for a specific session.
 │   ├── requirements.txt    # Python dependencies
 │   └── static/             # Built frontend assets
 ├── frontend-customer/
+│   ├── public/
+│   │   └── images/         # Static images (modem steps)
 │   ├── src/
 │   │   ├── App.jsx         # Customer chat UI
+│   │   ├── StepCard.jsx    # Step-by-step card component
+│   │   ├── StepCard.css    # Card styling
 │   │   └── index.css       # Tailwind styles
 │   ├── package.json
 │   └── vite.config.js

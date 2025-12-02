@@ -391,6 +391,9 @@ if not os.path.exists(static_dir):
 if os.path.exists(os.path.join(static_dir, "customer", "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "customer", "assets")), name="customer_assets")
 
+if os.path.exists(os.path.join(static_dir, "customer", "images")):
+    app.mount("/images", StaticFiles(directory=os.path.join(static_dir, "customer", "images")), name="customer_images")
+
 if os.path.exists(os.path.join(static_dir, "agent", "assets")):
     app.mount("/agent/assets", StaticFiles(directory=os.path.join(static_dir, "agent", "assets")), name="agent_assets")
 
