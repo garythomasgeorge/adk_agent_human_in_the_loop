@@ -201,6 +201,18 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                 # Send accumulated response when turn is complete
                 if event.turn_complete and accumulated_response:
                     print(f"Sending complete response: {accumulated_response}")
+                    
+                    # Create message object with timestamp
+                    bot_msg = {
+                        "sender": "bot",
+                        "content": accumulated_response,
+                        "timestamp": datetime.datetime.now().strftime("%H:%M")
+                    }
+                    
+                    # Add to session history FIRST
+                    manager.add_message(client_id, bot_msg)
+                    
+                    # Send to customer
                     await websocket.send_json({
                         "sender": "bot",
                         "content": accumulated_response
@@ -211,7 +223,8 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                         "type": "message",
                         "sender": "bot",
                         "content": accumulated_response,
-                        "clientId": client_id
+                        "clientId": client_id,
+                        "timestamp": bot_msg["timestamp"]
                     })
                     
                     # Reset accumulator for next turn
