@@ -366,22 +366,73 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                      last_sender = messages[-1]['sender'] if messages else None
                      
                      if last_sender != 'agent':
-                         join_msg = {"sender": "system", "content": "Agent has joined the chat."}
+                         # Update session status to agent_active
+                         manager.update_session_status(target_client_id, "agent_active")
+                         
+                         # Send system message to customer
+                         join_msg = {
+                             "sender": "system", 
+                             "content": "Agent has joined the chat.",
+                             "timestamp": datetime.datetime.now().strftime("%H:%M")
+                         }
                          manager.add_message(target_client_id, join_msg)
                          await manager.send_to_client(target_client_id, join_msg)
+                         
+                         # Broadcast to other agents
+                         await manager.broadcast_to_agents({
+                             "type": "message",
+                             "sender": "system",
+                             "content": "Agent has joined the chat.",
+                             "clientId": target_client_id,
+                             "timestamp": join_msg["timestamp"]
+                         })
+                         
+                         # Update customer app status
+                         await manager.send_to_client(target_client_id, {
+                             "type": "status_change", 
+                             "status": "agent_active"
+                         })
                      
-                     agent_msg = {"sender": "agent", "content": message_data["content"]}
+                     # Create agent message with timestamp
+                     agent_msg = {
+                         "sender": "agent", 
+                         "content": message_data["content"],
+                         "timestamp": datetime.datetime.now().strftime("%H:%M")
+                     }
                      manager.add_message(target_client_id, agent_msg)
                      
+                     # Send to customer
                      await manager.send_to_client(target_client_id, agent_msg)
+                     
+                     # Broadcast to other agents
+                     await manager.broadcast_to_agents({
+                         "type": "message",
+                         "sender": "agent",
+                         "content": message_data["content"],
+                         "clientId": target_client_id,
+                         "timestamp": agent_msg["timestamp"]
+                     })
                 
                 elif action_type == "end_session":
                     print(f"Received end_session for {target_client_id}")
+                    
+                    # Send system message to customer before ending
+                    end_msg = {
+                        "sender": "system",
+                        "content": "Agent has ended the chat. Thank you!",
+                        "timestamp": datetime.datetime.now().strftime("%H:%M")
+                    }
+                    manager.add_message(target_client_id, end_msg)
+                    await manager.send_to_client(target_client_id, end_msg)
+                    
+                    # End the session
                     manager.end_session(target_client_id)
+                    
                     # Notify agents to remove from active list
                     await manager.broadcast_to_agents({
                         "type": "session_ended",
-                        "clientId": target_client_id
+                        "clientId": target_client_id,
+                        "reason": "agent_closed"
                     })
         
         elif role == "customer":

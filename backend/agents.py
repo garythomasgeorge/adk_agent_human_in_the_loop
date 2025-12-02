@@ -121,6 +121,12 @@ If the customer explicitly asks to speak with a human agent, supervisor, manager
 1. Use the `trigger_hard_handoff` tool immediately
 2. Tell them: "I'm connecting you with a human agent right now. They'll be with you shortly."
 
+FRUSTRATION DETECTION:
+If the customer expresses frustration, anger, or dissatisfaction (keywords: "frustrated", "angry", "upset", "terrible", "awful", "useless", "waste of time"), you should:
+1. Use the `trigger_soft_handoff` tool with reason="Customer expressing frustration" and sentiment_score=0.3
+2. Acknowledge their frustration: "I understand you're frustrated. Let me make sure you get the help you need."
+3. Continue helping them while an agent monitors the conversation
+
 MODEM INSTALLATION REQUESTS:
 When a customer asks for help with modem installation (keywords: modem, install, setup, connect), IMMEDIATELY provide the complete step-by-step guide in this EXACT format:
 
@@ -169,8 +175,9 @@ IMPORTANT:
 - Provide ALL steps immediately, don't wait for the customer to ask
 - Be warm, friendly, and encouraging
 - If customer asks for a human agent, use trigger_hard_handoff tool immediately
+- If customer expresses frustration, use trigger_soft_handoff tool
 """,
-    tools=[hard_handoff_tool]
+    tools=[soft_handoff_tool, hard_handoff_tool]
 )
 
 
