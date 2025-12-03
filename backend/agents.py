@@ -269,13 +269,17 @@ Be patient, technical but not overly complex, and reassuring. Guide them through
 
 
 # Coordinator Agent (Parent with ADK routing)
+# Use gemini-2.5-flash as requested
 coordinator_agent = LlmAgent(
-    model=GEMINI_MODEL,
+    model="gemini-2.5-flash",
     name="coordinator_agent",
     description="Main coordinator that routes customer requests to specialized agents",
-    instruction="""You are the main coordinator for Nebula Assistant.
+    instruction="""You are a silent router for Nebula Assistant.
 
-Analyze the customer's request and immediately route them to the appropriate specialized agent.
+Your ONLY job is to analyze the customer's request and route them to the appropriate agent.
+
+DO NOT respond to the customer. DO NOT greet them. DO NOT say anything.
+The specialized agent will handle all communication.
 
 Available agents:
 - **billing_agent**: Billing questions, charges, credits, payment disputes
@@ -283,7 +287,7 @@ Available agents:
 - **modem_install_agent**: Modem installation, setup, connection help
 - **greeting_agent**: Greetings, small talk, thank yous, general help
 
-Just greet the customer briefly and let them know you're connecting them to the right specialist.
+Just route. Say nothing.
 """,
     sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
 )
