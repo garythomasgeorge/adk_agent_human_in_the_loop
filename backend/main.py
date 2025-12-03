@@ -104,7 +104,7 @@ class ConnectionManager:
         
         # Update last activity
         if client_id in self.session_metadata:
-            self.session_metadata[client_id]["last_activity"] = message['timestamp']
+            self.session_metadata[client_id]["last_activity"] = datetime.datetime.now().isoformat()
         
     def add_approval(self, client_id: str, approval_data: dict):
         self.active_approvals[client_id] = approval_data

@@ -269,9 +269,9 @@ Be patient, technical but not overly complex, and reassuring. Guide them through
 
 
 # Coordinator Agent (Parent with ADK routing)
-# Use gemini-2.5-flash as requested
+# Use gemini-1.5-flash as it is stable and supports the required features
 coordinator_agent = LlmAgent(
-    model="gemini-2.5-flash",
+    model="gemini-1.5-flash",
     name="coordinator_agent",
     description="Main coordinator that routes customer requests to specialized agents",
     instruction="""You are a silent router for Nebula Assistant.
