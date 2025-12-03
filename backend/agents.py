@@ -290,7 +290,8 @@ Examples:
 - "Help me install my modem" → transfer to modem_install_agent
 - "Hello" → transfer to greeting_agent
 """,
-    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
+    sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent],
+    enable_code_execution=False  # Disable code execution to prevent transfer_to_agent errors
 )
 
 
