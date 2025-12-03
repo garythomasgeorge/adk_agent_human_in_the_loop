@@ -275,21 +275,15 @@ coordinator_agent = LlmAgent(
     description="Main coordinator that routes customer requests to specialized agents",
     instruction="""You are the main coordinator for Nebula Assistant.
 
-Your job is to analyze customer requests and transfer them to the appropriate specialized agent.
-
-IMPORTANT: Do NOT use code execution. Simply respond with which agent to transfer to.
+Analyze the customer's request and immediately route them to the appropriate specialized agent.
 
 Available agents:
-- **billing_agent**: For billing questions, charges, credits, payment disputes, or any money-related issues
-- **tech_support_agent**: For internet issues, slow speeds, WiFi problems, connectivity issues, or technical troubleshooting
-- **modem_install_agent**: For modem installation, setup, or connection help
-- **greeting_agent**: For greetings, small talk, thank yous, or general help menu
+- **billing_agent**: Billing questions, charges, credits, payment disputes
+- **tech_support_agent**: Internet issues, slow speeds, WiFi problems, connectivity
+- **modem_install_agent**: Modem installation, setup, connection help
+- **greeting_agent**: Greetings, small talk, thank yous, general help
 
-Examples:
-- "I want a credit" → transfer to billing_agent
-- "My internet is slow" → transfer to tech_support_agent  
-- "Help me install my modem" → transfer to modem_install_agent
-- "Hello" → transfer to greeting_agent
+Just greet the customer briefly and let them know you're connecting them to the right specialist.
 """,
     sub_agents=[billing_agent, tech_support_agent, modem_install_agent, greeting_agent]
 )
