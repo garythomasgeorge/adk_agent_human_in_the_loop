@@ -239,16 +239,37 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                     for part in event.content.parts:
                         if part.function_call:
                             print(f"Function call detected: {part.function_call.name}")
+                            print(f"Function call args: {part.function_call.args}")
+                            
+                            # Check for invalid transfer function calls
+                            if "transfer" in part.function_call.name.lower() or "route" in part.function_call.name.lower():
+                                print(f"ERROR: Invalid function call detected: {part.function_call.name}")
+                                print("This function does not exist. The coordinator should not call transfer functions.")
+                                # Don't process this function call - it will fail anyway
+                                continue
+                            
                             # Check if it's an approval request
                             if part.function_call.name == "request_credit_approval":
+                                amount = part.function_call.args.get("amount")
+                                reason = part.function_call.args.get("reason")
                                 approval_data = {
                                     "type": "approval_request",
                                     "clientId": client_id,
-                                    "amount": part.function_call.args.get("amount"),
-                                    "reason": part.function_call.args.get("reason")
+                                    "amount": amount,
+                                    "reason": reason
                                 }
                                 manager.add_approval(client_id, approval_data)
                                 await manager.broadcast_to_agents(approval_data)
+                                
+                                # Send help text to customer about waiting for approval
+                                approval_help_msg = {
+                                    "sender": "system",
+                                    "content": f"⏳ Waiting for supervisor approval for ${amount:.2f} credit...",
+                                    "type": "approval_pending",
+                                    "timestamp": datetime.datetime.now().isoformat()
+                                }
+                                manager.add_message(client_id, approval_help_msg)
+                                await manager.send_to_client(client_id, approval_help_msg)
                             elif part.function_call.name == "request_tech_dispatch":
                                 approval_data = {
                                     "type": "approval_request",
@@ -258,21 +279,46 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
                                 }
                                 manager.add_approval(client_id, approval_data)
                                 await manager.broadcast_to_agents(approval_data)
+                            elif part.function_call.name == "get_bill_details":
+                                print(f"get_bill_details called - this is correct for bill inquiries")
+                                # The function will be executed by ADK automatically
                             elif part.function_call.name == "trigger_soft_handoff":
+                                reason = part.function_call.args.get("reason", "")
+                                print(f"WARNING: trigger_soft_handoff called with reason: {reason}")
+                                # Check recent messages to see if this is a bill inquiry
+                                recent_messages = manager.get_messages(client_id)
+                                if recent_messages:
+                                    last_customer_msg = recent_messages[-1].get("content", "").lower() if recent_messages[-1].get("sender") == "customer" else ""
+                                    if any(word in last_customer_msg for word in ["bill", "amount", "owe", "charge", "payment", "cost"]):
+                                        print(f"ERROR: Handoff called for bill inquiry! Last message: {last_customer_msg}")
+                                        # Don't hand off - instead log the error
+                                        # The agent should have called get_bill_details instead
+                                
                                 handoff_data = {
                                     "type": "soft_handoff",
                                     "clientId": client_id,
-                                    "reason": part.function_call.args.get("reason"),
+                                    "reason": reason,
                                     "sentimentScore": part.function_call.args.get("sentiment_score")
                                 }
                                 manager.update_session_status(client_id, "soft_handoff", part.function_call.args.get("sentiment_score"))
                                 await manager.broadcast_to_agents(handoff_data)
                                 await manager.send_to_client(client_id, {"type": "status_change", "status": "soft_handoff"})
                             elif part.function_call.name == "trigger_hard_handoff":
+                                reason = part.function_call.args.get("reason", "")
+                                print(f"WARNING: trigger_hard_handoff called with reason: {reason}")
+                                # Check recent messages to see if this is a bill inquiry
+                                recent_messages = manager.get_messages(client_id)
+                                if recent_messages:
+                                    last_customer_msg = recent_messages[-1].get("content", "").lower() if recent_messages[-1].get("sender") == "customer" else ""
+                                    if any(word in last_customer_msg for word in ["bill", "amount", "owe", "charge", "payment", "cost"]):
+                                        print(f"ERROR: Handoff called for bill inquiry! Last message: {last_customer_msg}")
+                                        # Don't hand off - instead log the error
+                                        # The agent should have called get_bill_details instead
+                                
                                 handoff_data = {
                                     "type": "hard_handoff",
                                     "clientId": client_id,
-                                    "reason": part.function_call.args.get("reason")
+                                    "reason": reason
                                 }
                                 manager.update_session_status(client_id, "hard_handoff")
                                 await manager.broadcast_to_agents(handoff_data)
@@ -280,8 +326,25 @@ async def agent_to_client_messaging(websocket: WebSocket, live_events, client_id
 
             except Exception as e:
                 print(f"Error processing event: {e}")
+                import traceback
+                traceback.print_exc()
+    except asyncio.TimeoutError:
+        print(f"Timeout in agent_to_client_messaging for {client_id}")
+        await websocket.send_json({
+            "sender": "system",
+            "content": "The agent is taking too long to respond. Please try again."
+        })
     except Exception as e:
         print(f"Error in agent_to_client_messaging loop: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await websocket.send_json({
+                "sender": "system",
+                "content": "An error occurred while processing your request. Please try again."
+            })
+        except:
+            pass  # WebSocket might be closed
     finally:
         print(f"Exiting agent_to_client_messaging for {client_id}")
 
@@ -294,6 +357,21 @@ async def client_to_agent_messaging(websocket: WebSocket, live_request_queue: Li
             print(f"Received message from client {client_id}: {data}")
             message_data = json.loads(data)
             
+            # Check if this is a session control message
+            if message_data.get("type") == "end_session":
+                print(f"Customer {client_id} requested to end session for new session")
+                # End the session silently (customer is starting fresh)
+                manager.end_session(client_id)
+                # Notify agents
+                await manager.broadcast_to_agents({
+                    "type": "session_ended",
+                    "clientId": client_id,
+                    "reason": "customer_new_session"
+                })
+                # Close the WebSocket connection
+                break
+            
+            # Regular message handling
             # Store message in history
             msg_obj = {
                 "sender": "customer",
@@ -316,6 +394,12 @@ async def client_to_agent_messaging(websocket: WebSocket, live_request_queue: Li
                 role="user",
                 parts=[Part.from_text(text=message_data["content"])]
             )
+            
+            # Check if this is a bill-related question and log it
+            msg_lower = message_data["content"].lower()
+            if any(word in msg_lower for word in ["bill", "amount", "owe", "charge", "payment", "cost", "what is my bill"]):
+                print(f"BILL QUESTION DETECTED: {message_data['content']}")
+                print("Expected: billing_agent should call get_bill_details")
             
             # Send to agent via queue
             print(f"Sending content to agent queue: {content}")
@@ -345,38 +429,73 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                 
                 if action_type == "approval_response":
                     approved = message_data.get("approved")
+                    
+                    # Get approval details before removing
+                    approval_info = manager.active_approvals.get(target_client_id, {})
+                    amount = approval_info.get("amount", 0)
+                    
                     manager.remove_approval(target_client_id) # Remove from active approvals
                     
                     if approved:
-                        response = "Supervisor approved your request."
+                        # Send success message with help text
+                        credit_msg = {
+                            "sender": "bot",
+                            "content": f"✅ Your ${amount:.2f} credit has been approved and issued to your account. The credit will appear on your next billing statement.",
+                            "timestamp": datetime.datetime.now().isoformat()
+                        }
+                        manager.add_message(target_client_id, credit_msg)
+                        await manager.send_to_client(target_client_id, credit_msg)
+                        
+                        # Also send a system help text
+                        help_msg = {
+                            "sender": "system",
+                            "content": "Credit issued successfully",
+                            "type": "approval_approved",
+                            "timestamp": datetime.datetime.now().isoformat()
+                        }
+                        manager.add_message(target_client_id, help_msg)
+                        await manager.send_to_client(target_client_id, help_msg)
+                        
+                        # Echo back to agents to update UI
+                        await manager.broadcast_to_agents({
+                            "type": "message",
+                            "sender": "bot",
+                            "content": credit_msg["content"],
+                            "clientId": target_client_id
+                        })
                     else:
                         response = "Supervisor declined your request."
-                    
-                    bot_msg = {"sender": "bot", "content": response}
-                    manager.add_message(target_client_id, bot_msg)
-                    
-                    await manager.send_to_client(target_client_id, bot_msg)
-                    # Echo back to agents to update UI
-                    await manager.broadcast_to_agents({
-                        "type": "message",
-                        "sender": "bot",
-                        "content": response,
-                        "clientId": target_client_id
-                    })
+                        bot_msg = {"sender": "bot", "content": response}
+                        manager.add_message(target_client_id, bot_msg)
+                        await manager.send_to_client(target_client_id, bot_msg)
+                        # Echo back to agents to update UI
+                        await manager.broadcast_to_agents({
+                            "type": "message",
+                            "sender": "bot",
+                            "content": response,
+                            "clientId": target_client_id
+                        })
                     
                 elif action_type == "takeover_message":
                      # Check if this is the first agent message to send "Joined" notification
                      messages = manager.get_messages(target_client_id)
                      last_sender = messages[-1]['sender'] if messages else None
                      
-                     if last_sender != 'agent':
+                     # Get agent name/ID (use agentName, agentId, or default)
+                     agent_id = message_data.get("agentId", "")
+                     agent_name = message_data.get("agentName") or (agent_id.split('-')[1].upper() if agent_id and '-' in agent_id else "Supervisor")
+                     
+                     # If this is a manual takeover (no message content) or first agent message
+                     if message_data.get("isManualTakeover") or last_sender != 'agent':
                          # Update session status to agent_active
                          manager.update_session_status(target_client_id, "agent_active")
                          
-                         # Send system message to customer
+                         # Send system message to customer with agent name
                          join_msg = {
                              "sender": "system", 
-                             "content": "Agent has joined the chat.",
+                             "content": f"Agent {agent_name} has joined the chat.",
+                             "type": "agent_joined",
+                             "agentName": agent_name,
                              "timestamp": datetime.datetime.now().isoformat()
                          }
                          manager.add_message(target_client_id, join_msg)
@@ -386,7 +505,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                          await manager.broadcast_to_agents({
                              "type": "message",
                              "sender": "system",
-                             "content": "Agent has joined the chat.",
+                             "content": f"Agent {agent_name} has joined the chat.",
                              "clientId": target_client_id,
                              "timestamp": join_msg["timestamp"]
                          })
@@ -397,50 +516,68 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
                              "status": "agent_active"
                          })
                      
-                     # Create agent message with timestamp
-                     agent_msg = {
-                         "sender": "agent", 
-                         "content": message_data["content"],
-                         "timestamp": datetime.datetime.now().isoformat()
-                     }
-                     manager.add_message(target_client_id, agent_msg)
-                     
-                     # Send to customer
-                     await manager.send_to_client(target_client_id, agent_msg)
-                     
-                     # Broadcast to other agents
-                     await manager.broadcast_to_agents({
-                         "type": "message",
-                         "sender": "agent",
-                         "content": message_data["content"],
-                         "clientId": target_client_id,
-                         "timestamp": agent_msg["timestamp"]
-                     })
+                     # If there's actual message content, send it
+                     if message_data.get("content"):
+                         # Create agent message with timestamp
+                         agent_msg = {
+                             "sender": "agent", 
+                             "content": message_data["content"],
+                             "timestamp": datetime.datetime.now().isoformat()
+                         }
+                         manager.add_message(target_client_id, agent_msg)
+                         
+                         # Send to customer
+                         await manager.send_to_client(target_client_id, agent_msg)
+                         
+                         # Broadcast to other agents
+                         await manager.broadcast_to_agents({
+                             "type": "message",
+                             "sender": "agent",
+                             "content": message_data["content"],
+                             "clientId": target_client_id,
+                             "timestamp": agent_msg["timestamp"]
+                         })
                 
                 elif action_type == "end_session":
                     print(f"Received end_session for {target_client_id}")
                     
-                    # Send system message to customer before ending
-                    end_msg = {
-                        "sender": "system",
-                        "content": "Agent has ended the chat. Thank you!",
-                        "timestamp": datetime.datetime.now().strftime("%H:%M")
-                    }
-                    manager.add_message(target_client_id, end_msg)
-                    await manager.send_to_client(target_client_id, end_msg)
+                    # Check if this is from customer (self-initiated) or agent
+                    is_customer_initiated = target_client_id == client_id and role == "customer"
                     
-                    # End the session
-                    manager.end_session(target_client_id)
-                    
-                    # Notify agents to remove from active list
-                    await manager.broadcast_to_agents({
-                        "type": "session_ended",
-                        "clientId": target_client_id,
-                        "reason": "agent_closed"
-                    })
+                    if is_customer_initiated:
+                        # Customer is starting a new session - just clean up silently
+                        print(f"Customer {target_client_id} is starting a new session")
+                        manager.end_session(target_client_id)
+                        
+                        # Notify agents to remove from active list
+                        await manager.broadcast_to_agents({
+                            "type": "session_ended",
+                            "clientId": target_client_id,
+                            "reason": "customer_new_session"
+                        })
+                    else:
+                        # Agent ended the chat - send message to customer
+                        end_msg = {
+                            "sender": "system",
+                            "content": "Agent has ended the chat. Thank you!",
+                            "timestamp": datetime.datetime.now().strftime("%H:%M")
+                        }
+                        manager.add_message(target_client_id, end_msg)
+                        await manager.send_to_client(target_client_id, end_msg)
+                        
+                        # End the session
+                        manager.end_session(target_client_id)
+                        
+                        # Notify agents to remove from active list
+                        await manager.broadcast_to_agents({
+                            "type": "session_ended",
+                            "clientId": target_client_id,
+                            "reason": "agent_closed"
+                        })
         
         elif role == "customer":
-            # 1. Use Coordinator Agent for ADK-based routing
+            # 1. Initialize Runner with coordinator agent
+            # Note: We'll handle routing at the message level to avoid timeout issues
             selected_agent = coordinator_agent
             
             # 2. Initialize Runner for this session
@@ -466,21 +603,49 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, role: str):
             
             # 6. Start Live Streaming
             print(f"Starting run_live for {client_id}")
-            live_events = runner.run_live(
-                session=session,
-                live_request_queue=live_request_queue,
-                run_config=run_config
-            )
-            
-            # 7. Start bidirectional tasks
-            agent_task = asyncio.create_task(agent_to_client_messaging(websocket, live_events, client_id))
-            client_task = asyncio.create_task(client_to_agent_messaging(websocket, live_request_queue, client_id))
-            
-            # Wait for disconnection
-            await asyncio.wait([agent_task, client_task], return_when=asyncio.FIRST_EXCEPTION)
-            
-            # Cleanup
-            live_request_queue.close()
+            try:
+                live_events = runner.run_live(
+                    session=session,
+                    live_request_queue=live_request_queue,
+                    run_config=run_config
+                )
+                
+                # 7. Start bidirectional tasks with timeout protection
+                agent_task = asyncio.create_task(agent_to_client_messaging(websocket, live_events, client_id))
+                client_task = asyncio.create_task(client_to_agent_messaging(websocket, live_request_queue, client_id))
+                
+                # Wait for disconnection with timeout
+                done, pending = await asyncio.wait(
+                    [agent_task, client_task], 
+                    return_when=asyncio.FIRST_EXCEPTION,
+                    timeout=300  # 5 minute timeout
+                )
+                
+                # Cancel pending tasks if timeout occurred
+                if pending:
+                    print(f"Timeout or completion for {client_id}, cancelling pending tasks")
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                            
+            except asyncio.TimeoutError:
+                print(f"Timeout error for {client_id}")
+                await websocket.send_json({
+                    "sender": "system",
+                    "content": "Session timed out. Please refresh and try again."
+                })
+            except Exception as e:
+                print(f"Error in run_live for {client_id}: {e}")
+                await websocket.send_json({
+                    "sender": "system", 
+                    "content": "An error occurred. Please try again."
+                })
+            finally:
+                # Cleanup
+                live_request_queue.close()
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, client_id, role)

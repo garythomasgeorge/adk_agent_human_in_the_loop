@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Sparkles, XCircle, Clock } from 'lucide-react';
+import { Send, Bot, User, Sparkles, XCircle, Clock, RefreshCw, CheckCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import StepCard from './StepCard';
@@ -10,7 +10,7 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [ws, setWs] = useState(null);
-  const [clientId] = useState(`customer-${Math.random().toString(36).substr(2, 9)}`);
+  const [clientId, setClientId] = useState(`customer-${Math.random().toString(36).substr(2, 9)}`);
   const [isAgentConnected, setIsAgentConnected] = useState(false);
   const [completedSteps, setCompletedSteps] = useState({});
   const [currentStepIndex, setCurrentStepIndex] = useState({});
@@ -116,7 +116,9 @@ function App() {
       setMessages(prev => [...prev, {
         sender: data.sender,
         content: data.content,
-        timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: data.type, // approval_pending, approval_approved, agent_joined
+        agentName: data.agentName // For agent joined messages
       }]);
 
       // Show countdown for processing messages
@@ -153,6 +155,39 @@ function App() {
     // Optional: Disable input or show restart button
   };
 
+  const handleNewSession = async () => {
+    // End the current session on the backend if WebSocket is connected
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'end_session', targetClientId: clientId }));
+        // Wait a moment for the message to be sent
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (error) {
+        console.error('Error ending session:', error);
+      }
+    }
+    
+    // Close existing WebSocket
+    if (ws) {
+      ws.close();
+    }
+    
+    // Clear all state
+    setMessages([]);
+    setInput('');
+    setIsAgentConnected(false);
+    setSessionStatus('bot_only');
+    setCompletedSteps({});
+    setCurrentStepIndex({});
+    setShowCountdown({});
+    
+    // Generate new client ID
+    const newClientId = `customer-${Math.random().toString(36).substr(2, 9)}`;
+    setClientId(newClientId);
+    
+    // The useEffect will automatically create a new WebSocket connection with the new clientId
+  };
+
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans">
       {/* Header */}
@@ -169,6 +204,13 @@ function App() {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-500 hidden sm:inline">Always here to help</span>
+            <button
+              onClick={handleNewSession}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-full text-sm font-medium transition-colors border border-blue-200"
+              title="Start a new session"
+            >
+              <RefreshCw size={16} /> New Session
+            </button>
             {isAgentConnected && (
               <button
                 onClick={handleEndChat}
@@ -204,8 +246,45 @@ function App() {
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent">
         <div className="w-[60%] mx-auto space-y-6">
           {messages.map((msg, idx) => {
-            // System Message
+            // System Message with special styling for different types
             if (msg.sender === 'system') {
+              // Approval pending help text
+              if (msg.type === 'approval_pending') {
+                return (
+                  <div key={idx} className="flex justify-center my-3">
+                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-4 py-2 rounded-lg shadow-sm">
+                      <Clock size={14} className="text-amber-600 animate-pulse" />
+                      <span className="text-sm font-medium text-amber-700">{msg.content}</span>
+                    </div>
+                  </div>
+                );
+              }
+              
+              // Approval approved help text
+              if (msg.type === 'approval_approved') {
+                return (
+                  <div key={idx} className="flex justify-center my-3">
+                    <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-4 py-2 rounded-lg shadow-sm">
+                      <CheckCircle size={14} className="text-green-600" />
+                      <span className="text-sm font-medium text-green-700">{msg.content}</span>
+                    </div>
+                  </div>
+                );
+              }
+              
+              // Agent joined help text
+              if (msg.type === 'agent_joined') {
+                return (
+                  <div key={idx} className="flex justify-center my-3">
+                    <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-4 py-2 rounded-lg shadow-sm">
+                      <User size={14} className="text-blue-600" />
+                      <span className="text-sm font-medium text-blue-700">{msg.content}</span>
+                    </div>
+                  </div>
+                );
+              }
+              
+              // Default system message
               return (
                 <div key={idx} className="flex justify-center my-4">
                   <span className="text-xs font-medium text-slate-400 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">

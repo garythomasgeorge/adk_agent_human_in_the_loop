@@ -152,7 +152,16 @@ function App() {
     const input = e.target.elements.message.value;
     if (!input.trim() || !selectedChatId || !ws) return;
 
-    ws.send(JSON.stringify({ type: 'takeover_message', targetClientId: selectedChatId, content: input }));
+    // Get agent name (use clientId or a default)
+    const agentName = clientId.split('-')[1]?.toUpperCase() || 'Supervisor';
+    
+    ws.send(JSON.stringify({ 
+      type: 'takeover_message', 
+      targetClientId: selectedChatId, 
+      content: input,
+      agentName: agentName,
+      agentId: clientId
+    }));
 
     setMessages(prev => ({
       ...prev,
@@ -182,7 +191,21 @@ function App() {
 
   const handleManualTakeover = (chatId) => {
     if (!ws) return;
-    // Just update status locally and maybe send a system message?
+    
+    // Get agent name
+    const agentName = clientId.split('-')[1]?.toUpperCase() || 'Supervisor';
+    
+    // Send takeover message to notify customer
+    ws.send(JSON.stringify({ 
+      type: 'takeover_message', 
+      targetClientId: chatId, 
+      content: '', // Empty content, just joining
+      agentName: agentName,
+      agentId: clientId,
+      isManualTakeover: true
+    }));
+    
+    // Update status locally
     setSessionMetadata(prev => ({
       ...prev,
       [chatId]: {
